@@ -1,0 +1,53 @@
+:root{
+  --bg:#F5F1E8;
+  --paper:#FAFAF7;
+  --paper-2:#F1ECDF;
+  --olive:#2F4A3D;
+  --olive-2:#3a5a4a;
+  --beige:#EAE3D6;
+  --line:#E6DED2;
+  --line-2:#EFE8DA;
+  --ink:#2D2A26;
+  --ink-2:#5b554c;
+  --muted:#8B8375;
+  --gold:#A4843A;
+  --premium:#7C5A2A;
+  --accent:#A74D4A;
+  --accent-2:#8e3f3c;
+  --accent-soft:rgba(167,77,74,.08);
+  --red:#8B2E2A;
+  --shadow-sm: 0 1px 2px rgba(45,42,38,.04), 0 1px 1px rgba(45,42,38,.03);
+  --shadow:    0 1px 2px rgba(45,42,38,.05), 0 8px 24px -10px rgba(45,42,38,.10);
+  --shadow-lg: 0 2px 4px rgba(45,42,38,.06), 0 24px 60px -20px rgba(45,42,38,.20);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+  font-family:'Inter',ui-sans-serif,system-ui,sans-serif;
+  font-feature-settings:"ss01","cv11";
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;}
+button{font-family:inherit;color:inherit;cursor:pointer;border:none;background:none;padding:0}
+input,select,textarea{font-family:inherit;color:inherit}
+::selection{background:var(--olive);color:#fff}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#d8d0bf;border-radius:10px;border:2px solid var(--bg)}
+::-webkit-scrollbar-thumb:hover{background:#bfb6a3}
+::-webkit-scrollbar-track{background:transparent}
+
+#root{min-height:100vh}
+
+/* Layout principal */
+.app{display:flex;min-height:100vh;align-items:flex-start}
+
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes popIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes sortIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* ----- Responsive: el cliente lo usará en desktop, pero mantenemos un fallback usable. ----- */
+@media (max-width: 1100px){
+  .app{flex-direction:column}
+  .sidebar{position:relative !important;width:100% !important;flex:0 0 auto !important;height:auto !important;border-right:none !important;border-bottom:1px solid var(--line)}
+  .pv{position:relative !important;width:100% !important;flex:0 0 auto !important;height:auto !important;border-left:none !important;border-top:1px solid var(--line)}
+  .catalog,.screen{padding:24px 18px 32px !important;height:auto !important}
+  .cat-title{font-size:34px !important}
+}
