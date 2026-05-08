@@ -8,3 +8,4 @@ dist
 *.log
 _design
 _reference
+.claude/settings.local.json
