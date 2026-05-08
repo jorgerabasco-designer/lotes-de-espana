@@ -95,12 +95,40 @@ export async function deleteProduct(sku) {
 
 export async function uploadProductPhoto(file, sku) {
   if (!SUPABASE_READY) return URL.createObjectURL(file);
-  const ext = (file.name.split('.').pop() || 'png').toLowerCase();
-  const path = `${sku}.${ext}`;
-  const { error } = await supabase.storage
+  if (!file) throw new Error('No hay archivo de imagen seleccionado.');
+  if (!sku) throw new Error('Falta la referencia (RP) del producto.');
+
+  // Sanitizar referencia (sólo letras, números, _ y -). Evita errores 400 de Storage.
+  const cleanSku = String(sku).trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  if (!cleanSku) throw new Error(`Referencia "${sku}" no válida. Usa solo letras y números.`);
+
+  const rawExt = (file.name?.split('.').pop() || 'png').toLowerCase();
+  const ext = rawExt.replace(/[^a-z0-9]/g, '') || 'png';
+  const path = `${cleanSku}.${ext}`;
+
+  // Log detallado: si algo falla, en DevTools → Console verás el detalle.
+  console.log('[Storage] Subiendo:', { bucket: STORAGE_BUCKET_PRODUCTS, path, size: file.size, type: file.type || 'unknown' });
+
+  const { data, error } = await supabase.storage
     .from(STORAGE_BUCKET_PRODUCTS)
-    .upload(path, file, { upsert: true, contentType: file.type });
-  if (error) throw error;
+    .upload(path, file, { upsert: true, contentType: file.type || 'image/png' });
+
+  if (error) {
+    console.error('[Storage] Error completo:', error);
+    const msg = String(error.message || error.error || '').toLowerCase();
+    if (msg.includes('bucket') && (msg.includes('not found') || msg.includes('no encontrado'))) {
+      throw new Error('El bucket "productos" no existe en tu Supabase. Ve a Supabase → SQL Editor → pega y ejecuta supabase/schema.sql.');
+    }
+    if (msg.includes('row') && msg.includes('policy')) {
+      throw new Error('Permisos insuficientes en el bucket "productos". Vuelve a ejecutar supabase/schema.sql para arreglar las policies.');
+    }
+    if (msg.includes('invalid path')) {
+      throw new Error(`Supabase rechazó la ruta "${path}". El bucket "productos" probablemente no existe o no es público. Revisa Supabase → Storage.`);
+    }
+    throw new Error(error.message || 'Error desconocido subiendo la imagen.');
+  }
+
+  console.log('[Storage] OK:', data);
   return path;
 }
 
@@ -173,6 +201,67 @@ export async function setSetting(key, value) {
   const { error } = await supabase.from('settings').upsert({ key, value });
   if (error) throw error;
   return value;
+}
+
+// ---------- DIAGNÓSTICO SUPABASE ----------
+export async function diagnoseSupabase() {
+  const report = {
+    supabaseReady: SUPABASE_READY,
+    productsTable: null,
+    bodegonesTable: null,
+    settingsTable: null,
+    bucketProductos: null,
+    bucketBodegones: null,
+    canUploadTest: null,
+  };
+  if (!SUPABASE_READY) return report;
+
+  // Tablas
+  for (const t of ['products', 'bodegones', 'settings']) {
+    try {
+      const { error } = await supabase.from(t).select('*', { count: 'exact', head: true });
+      report[t === 'products' ? 'productsTable' : t === 'bodegones' ? 'bodegonesTable' : 'settingsTable']
+        = error ? `❌ ${error.message}` : '✓ OK';
+    } catch (e) {
+      report[t === 'products' ? 'productsTable' : t === 'bodegones' ? 'bodegonesTable' : 'settingsTable']
+        = `❌ ${e.message}`;
+    }
+  }
+
+  // Buckets
+  try {
+    const { data: buckets, error } = await supabase.storage.listBuckets();
+    if (error) {
+      report.bucketProductos = `❌ ${error.message}`;
+      report.bucketBodegones = `❌ ${error.message}`;
+    } else {
+      const names = (buckets || []).map(b => b.name);
+      report.bucketProductos = names.includes('productos') ? '✓ existe' : '❌ no existe';
+      report.bucketBodegones = names.includes('bodegones') ? '✓ existe' : '❌ no existe';
+    }
+  } catch (e) {
+    report.bucketProductos = `❌ ${e.message}`;
+    report.bucketBodegones = `❌ ${e.message}`;
+  }
+
+  // Subida de prueba (un pixel PNG)
+  try {
+    const tinyPng = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    const blob = new Blob([tinyPng], { type: 'image/png' });
+    const file = new File([blob], 'diagnostic-test.png', { type: 'image/png' });
+    const { error } = await supabase.storage.from('productos').upload('__diagnostic-test.png', file, { upsert: true, contentType: 'image/png' });
+    if (error) {
+      report.canUploadTest = `❌ ${error.message}`;
+    } else {
+      report.canUploadTest = '✓ OK';
+      // Limpiar el archivo de prueba
+      await supabase.storage.from('productos').remove(['__diagnostic-test.png']).catch(() => {});
+    }
+  } catch (e) {
+    report.canUploadTest = `❌ ${e.message}`;
+  }
+
+  return report;
 }
 
 // ---------- GENERATE BODEGON (vía Netlify Function) ----------

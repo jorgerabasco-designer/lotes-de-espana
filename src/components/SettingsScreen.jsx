@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
 import { DEFAULT_PROMPT_TEMPLATE } from '../lib/constants.js';
-import { getSetting, setSetting } from '../lib/api.js';
+import { getSetting, setSetting, diagnoseSupabase } from '../lib/api.js';
 import { SUPABASE_READY } from '../lib/supabase.js';
 import { importSeedProducts, SEED_PRODUCTS } from '../lib/seed.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
@@ -17,6 +17,18 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
   const [seedBusy, setSeedBusy] = useState(false);
   const [seedProgress, setSeedProgress] = useState(null);
   const [seedDone, setSeedDone] = useState(false);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [diagReport, setDiagReport] = useState(null);
+
+  const handleDiagnose = async () => {
+    setDiagBusy(true);
+    try {
+      const r = await diagnoseSupabase();
+      setDiagReport(r);
+    } finally {
+      setDiagBusy(false);
+    }
+  };
 
   const handleImportSeed = async () => {
     if (!confirm(`Se subirán ${SEED_PRODUCTS.length} productos demo (con sus imágenes) a tu Supabase. ¿Continuar?`)) return;
@@ -185,6 +197,36 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
               <div className="seed-block">
                 <div className="seed-h">
                   <div>
+                    <div className="seed-t">Diagnóstico de Supabase</div>
+                    <div className="seed-s">
+                      Comprueba que las tablas y los buckets existen y que la app puede subir imágenes.
+                    </div>
+                  </div>
+                </div>
+                <button className="btn btn-ghost" onClick={handleDiagnose} disabled={!SUPABASE_READY || diagBusy}>
+                  {I.refresh({ size: 14 })} {diagBusy ? 'Comprobando…' : 'Ejecutar diagnóstico'}
+                </button>
+                {diagReport && (
+                  <div className="diag-result">
+                    <div><strong>Cliente Supabase:</strong> {diagReport.supabaseReady ? '✓ inicializado' : '❌ sin claves'}</div>
+                    <div><strong>Tabla products:</strong> {diagReport.productsTable}</div>
+                    <div><strong>Tabla bodegones:</strong> {diagReport.bodegonesTable}</div>
+                    <div><strong>Tabla settings:</strong> {diagReport.settingsTable}</div>
+                    <div><strong>Bucket productos:</strong> {diagReport.bucketProductos}</div>
+                    <div><strong>Bucket bodegones:</strong> {diagReport.bucketBodegones}</div>
+                    <div><strong>Subida de prueba:</strong> {diagReport.canUploadTest}</div>
+                    {(String(diagReport.bucketProductos).includes('❌') || String(diagReport.canUploadTest).includes('❌')) && (
+                      <div className="diag-fix">
+                        ⚠️ Algo falla en Storage. Ve a Supabase → SQL Editor → ejecuta de nuevo el archivo <code>supabase/schema.sql</code> entero (es seguro re-ejecutarlo).
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="seed-block">
+                <div className="seed-h">
+                  <div>
                     <div className="seed-t">Importar productos de demostración</div>
                     <div className="seed-s">
                       Sube de un golpe los {SEED_PRODUCTS.length} productos de muestra (vino, AOVE, turrones, conservas, snacks…) con sus fotos a tu Supabase. Útil para probar la app sin tener que rellenar el catálogo desde cero.
@@ -271,6 +313,11 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
         .seed-warn code{font-family:ui-monospace,Menlo,monospace;background:#fff;padding:1px 5px;border-radius:4px;font-size:11.5px}
         .seed-progress{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
         .seed-done{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:rgba(58,122,90,.08);border:1px solid rgba(58,122,90,.3);border-radius:8px;font-size:12.5px;color:#3a7a5a;font-weight:600}
+
+        .diag-result{padding:12px 14px;background:var(--paper);border:1px solid var(--line);border-radius:9px;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;width:100%;color:var(--ink-2)}
+        .diag-result strong{color:var(--ink);margin-right:6px;font-weight:600}
+        .diag-fix{margin-top:10px;padding:10px 12px;background:rgba(167,77,74,.08);border:1px solid var(--accent);border-radius:8px;color:var(--accent);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:500;line-height:1.5}
+        .diag-fix code{font-family:ui-monospace,Menlo,monospace;background:#fff;padding:1px 6px;border-radius:4px;font-size:11.5px;color:var(--ink)}
 
         .tax-section{display:flex;flex-direction:column;gap:14px}
         .tax-h{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:2px}
