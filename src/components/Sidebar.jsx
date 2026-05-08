@@ -18,7 +18,7 @@ export default function Sidebar({
     { id: 'settings', label: 'Configuración', icon: 'settings' },
   ];
 
-  const toggleTag = (t) => setTags(tags.includes(t) ? tags.filter(x => x !== t) : [...tags, t]);
+  const toggleTag = (id) => setTags(tags.includes(id) ? tags.filter(x => x !== id) : [...tags, id]);
   const toggleBrand = (b) => setSelBrands(selBrands.includes(b) ? selBrands.filter(x => x !== b) : [...selBrands, b]);
 
   return (
@@ -57,7 +57,7 @@ export default function Sidebar({
               <div className="filter-label">Tags</div>
               <div className="pill-row">
                 {allTags.map(t => (
-                  <button key={t} className={`spill stag ${tags.includes(t) ? 'on' : ''}`} onClick={() => toggleTag(t)}>{t}</button>
+                  <button key={t.id} className={`spill stag ${tags.includes(t.id) ? 'on' : ''}`} onClick={() => toggleTag(t.id)}>{t.label}</button>
                 ))}
               </div>
             </>

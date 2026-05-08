@@ -7,14 +7,15 @@ import HistoryScreen from './components/HistoryScreen.jsx';
 import SettingsScreen from './components/SettingsScreen.jsx';
 import BodegonOverlay from './components/BodegonOverlay.jsx';
 import ImportExcelModal from './components/ImportExcelModal.jsx';
-import { CAT_LABELS } from './lib/constants.js';
 import {
   listProducts, upsertProduct, deleteProduct,
   listBodegones, updateBodegon, deleteBodegon,
 } from './lib/api.js';
 import { SUPABASE_READY } from './lib/supabase.js';
+import { useTaxonomy } from './lib/taxonomy.jsx';
 
 export default function App() {
+  const taxonomy = useTaxonomy();
   const [products, setProducts] = useState([]);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -61,18 +62,29 @@ export default function App() {
 
   const brands = useMemo(() => Array.from(new Set(products.map(p => p.brand))).filter(Boolean).sort(), [products]);
   const cats = useMemo(() => {
-    const set = new Set(products.map(p => p.cat));
-    return Object.entries(CAT_LABELS)
-      .filter(([id]) => set.has(id))
-      .map(([id, label]) => ({ id, label }));
-  }, [products]);
-  const allTags = ['Vegano', 'Bio', 'Con alcohol', 'Sin gluten'];
+    // En la sidebar mostramos solo categorías que tengan al menos 1 producto.
+    const used = new Set(products.map(p => p.cat));
+    return taxonomy.categories.filter(c => used.has(c.id));
+  }, [products, taxonomy.categories]);
+  const allTags = taxonomy.tags;
 
   const toggle = (sku) => setSelected(s => s.includes(sku) ? s.filter(x => x !== sku) : [...s, sku]);
   const clearSel = () => setSelected([]);
 
   const handleCreate = () => {
     if (selected.length === 0) return;
+    const missing = selected.filter(sku => {
+      const p = products.find(x => x.sku === sku);
+      return !p || !p.img;
+    });
+    if (missing.length) {
+      alert(
+        `No se puede generar el bodegón.\n\n` +
+        `${missing.length} producto(s) sin foto: ${missing.join(', ')}.\n\n` +
+        `Edita esos productos y sube una foto antes de incluirlos.`
+      );
+      return;
+    }
     setBodegonTitle(`Bodegón IA #${bodegonNumber}`);
     setBodegonDesc('');
     setBodegonOpen(true);
@@ -106,19 +118,21 @@ export default function App() {
   const openEdit = (p) => { setEditProduct(p); setEditOpen(true); };
 
   const handleSaveProduct = async (form) => {
-    try {
-      const saved = await upsertProduct(form);
-      setProducts(ps => {
-        const i = ps.findIndex(x => x.sku === saved.sku);
-        if (i >= 0) {
-          const next = [...ps]; next[i] = { ...ps[i], ...saved }; return next;
-        }
-        return [saved, ...ps];
-      });
-      setEditOpen(false);
-    } catch (e) {
-      alert('Error guardando producto: ' + e.message);
-    }
+    // Lanza si falla — el overlay captura y muestra el banner de error.
+    const saved = await upsertProduct(form);
+    setProducts(ps => {
+      const i = ps.findIndex(x => x.sku === saved.sku);
+      if (i >= 0) {
+        const next = [...ps]; next[i] = { ...ps[i], ...saved }; return next;
+      }
+      return [saved, ...ps];
+    });
+    return saved;
+  };
+
+  const refreshProducts = async () => {
+    const ps = await listProducts();
+    setProducts(ps);
   };
 
   const handleDeleteProduct = async (sku) => {
@@ -206,7 +220,7 @@ export default function App() {
         />
       )}
 
-      {!loading && active === 'settings' && <SettingsScreen/>}
+      {!loading && active === 'settings' && <SettingsScreen products={products} onProductsChanged={refreshProducts}/>}
 
       <ProductEditOverlay
         open={editOpen}

@@ -1,22 +1,33 @@
-export const CAT_LABELS = {
-  vinos: 'Vinos',
-  aceites: 'Aceites',
-  turrones: 'Turrones',
-  conservas: 'Conservas',
-  galletas: 'Galletas',
-  snacks: 'Snacks',
-  dulces: 'Dulces',
-};
+export const DEFAULT_CATEGORIES = [
+  { id: 'vinos',     label: 'Vinos' },
+  { id: 'aceites',   label: 'Aceites' },
+  { id: 'turrones',  label: 'Turrones' },
+  { id: 'conservas', label: 'Conservas' },
+  { id: 'galletas',  label: 'Galletas' },
+  { id: 'snacks',    label: 'Snacks' },
+  { id: 'dulces',    label: 'Dulces' },
+];
 
-export const CAT_OPTS = Object.entries(CAT_LABELS).map(([value, label]) => ({ value, label }));
+export const DEFAULT_TAGS = [
+  { id: 'vegano',      label: 'Vegano' },
+  { id: 'bio',         label: 'Bio' },
+  { id: 'sin-gluten',  label: 'Sin gluten' },
+  { id: 'con-alcohol', label: 'Con alcohol' },
+  { id: 'artesano',    label: 'Artesano' },
+];
 
-export const TAG_LABELS = {
-  vegano: 'Vegano',
-  bio: 'Bio',
-  'sin-gluten': 'Sin gluten',
-  'con-alcohol': 'Con alcohol',
-  artesano: 'Artesano',
-};
+export function makeCatLabels(categories) {
+  return Object.fromEntries((categories || []).map(c => [c.id, c.label]));
+}
+
+export function makeCatOpts(categories) {
+  return (categories || []).map(c => ({ value: c.id, label: c.label }));
+}
+
+// Compatibilidad para componentes que aún no usan el contexto.
+export const CAT_LABELS = makeCatLabels(DEFAULT_CATEGORIES);
+export const CAT_OPTS  = makeCatOpts(DEFAULT_CATEGORIES);
+export const TAG_LABELS = Object.fromEntries(DEFAULT_TAGS.map(t => [t.id, t.label]));
 
 export const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
 The result must look like a clean, polished product hero shot for an online catalog or product listing page — NOT a lifestyle photo, NOT a flat lay, NOT a holiday/Christmas decorative scene.

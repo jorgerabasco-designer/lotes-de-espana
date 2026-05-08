@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { I } from './icons.jsx';
-import { CAT_LABELS } from '../lib/constants.js';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 
 const DensityIcon = ({ n }) => {
-  const cells = n === 3 ? [[0,0],[1,0],[2,0]] : n === 4 ? [[0,0],[1,0],[2,0],[3,0]] : [[0,0],[1,0],[2,0],[3,0],[4,0],[5,0]];
-  const sz = n === 3 ? 4.5 : n === 4 ? 3.5 : 2.2;
-  const gap = n === 3 ? 1.6 : n === 4 ? 1.4 : 1;
+  const sz = n <= 4 ? 3.5 : n <= 6 ? 2.2 : 1.5;
+  const gap = n <= 4 ? 1.4 : n <= 6 ? 1 : 0.7;
   const total = n * sz + (n - 1) * gap;
   const off = (16 - total) / 2;
   return (
     <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
-      {cells.map(([x], i) => (
-        <rect key={i} x={off + x * (sz + gap)} y="3.5" width={sz} height="7" rx="1" fill="currentColor"/>
+      {Array.from({ length: n }, (_, i) => (
+        <rect key={i} x={off + i * (sz + gap)} y="3.5" width={sz} height="7" rx="1" fill="currentColor"/>
       ))}
     </svg>
   );
@@ -24,7 +23,7 @@ export default function Catalog({
   onCreate, onCreateProduct, onClearSel, onImport,
 }) {
   const [sortOpen, setSortOpen] = useState(false);
-  const [cols, setCols] = useState(() => Number(localStorage.getItem('catalog-cols')) || 3);
+  const [cols, setCols] = useState(() => Number(localStorage.getItem('catalog-cols')) || 4);
   const setColsP = (n) => { setCols(n); localStorage.setItem('catalog-cols', String(n)); };
 
   const SORT_LABELS = { used: 'Más usados', recent: 'Más recientes', az: 'A → Z', za: 'Z → A' };
@@ -32,17 +31,7 @@ export default function Catalog({
   const filtered = products.filter(p => {
     if (cat !== 'all' && p.cat !== cat) return false;
     if (selBrands.length > 0 && !selBrands.includes(p.brand)) return false;
-    if (tags.length) {
-      const ok = tags.every(t => {
-        const tt = t.toLowerCase();
-        if (tt === 'vegano') return (p.tags || []).includes('vegano');
-        if (tt === 'bio') return (p.tags || []).includes('bio');
-        if (tt === 'con alcohol') return (p.tags || []).includes('con-alcohol');
-        if (tt === 'sin gluten') return (p.tags || []).includes('sin-gluten');
-        return true;
-      });
-      if (!ok) return false;
-    }
+    if (tags.length && !tags.every(id => (p.tags || []).includes(id))) return false;
     if (query && !(p.name + p.brand + p.sku).toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -92,7 +81,7 @@ export default function Catalog({
           )}
         </div>
         <div className="density">
-          {[3, 4, 6].map(n => (
+          {[4, 6, 8].map(n => (
             <button key={n} className={`dens ${cols === n ? 'on' : ''}`} onClick={() => setColsP(n)} title={`${n} columnas`}>
               <DensityIcon n={n}/>
             </button>
@@ -169,22 +158,42 @@ export default function Catalog({
 }
 
 function ProductCard({ p, sel, selIdx = 0, onToggle }) {
-  const catLabel = CAT_LABELS[p.cat] || p.cat;
+  const { catLabels, tagLabels } = useTaxonomy();
+  const catLabel = catLabels[p.cat] || p.cat;
+  const noPhoto = !p.img;
+  const handleClick = () => {
+    if (noPhoto) {
+      alert(`"${p.name}" no tiene foto. Edita el producto y sube una imagen para poder incluirlo en un bodegón.`);
+      return;
+    }
+    onToggle();
+  };
   return (
-    <button type="button" className={`pcard ${sel ? 'sel' : ''}`} onClick={onToggle} aria-pressed={sel}>
+    <button
+      type="button"
+      className={`pcard ${sel ? 'sel' : ''} ${noPhoto ? 'nophoto' : ''}`}
+      onClick={handleClick}
+      aria-pressed={sel}
+      title={noPhoto ? 'Sin foto · no se puede usar en bodegones' : ''}
+    >
       <div className="pcard-top">
         <span className="pcat">{catLabel}</span>
+        {noPhoto && <span className="pwarn">Sin foto</span>}
       </div>
       <div className="pcard-img">
-        {p.img ? <img src={p.img} alt={p.name} draggable={false}/> : <div className="pcard-noimg">Sin imagen</div>}
+        {p.img ? <img src={p.img} alt={p.name} draggable={false}/> : <div className="pcard-noimg">{I.upload({ size: 22 })}<div>Falta foto</div></div>}
         <div className="pcard-veil" aria-hidden></div>
-        <div className="pcard-badge" aria-hidden>
-          <span className="pcard-badge-num">{selIdx > 0 ? selIdx : ''}</span>
-          <span className="pcard-badge-check">{I.check({ size: 14 })}</span>
-        </div>
-        <div className="pcard-tap" aria-hidden>
-          <span>{sel ? 'Quitar' : 'Añadir'}</span>
-        </div>
+        {!noPhoto && (
+          <div className="pcard-badge" aria-hidden>
+            <span className="pcard-badge-num">{selIdx > 0 ? selIdx : ''}</span>
+            <span className="pcard-badge-check">{I.check({ size: 14 })}</span>
+          </div>
+        )}
+        {!noPhoto && (
+          <div className="pcard-tap" aria-hidden>
+            <span>{sel ? 'Quitar' : 'Añadir'}</span>
+          </div>
+        )}
       </div>
       <div className="pcard-body">
         <div className="pname">{p.name}</div>
@@ -197,8 +206,7 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
           {(p.tags || []).length > 0 && (
             <div className="ptag-row">
               {(p.tags || []).slice(0, 2).map(t => {
-                const lbl = ({ vegano: 'Vegano', bio: 'Bio', 'con-alcohol': 'Con alcohol', 'sin-gluten': 'Sin gluten' })[t];
-                if (!lbl) return null;
+                const lbl = tagLabels[t] || t;
                 return <span key={t} className="ptag">{lbl}</span>;
               })}
             </div>
@@ -219,7 +227,11 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
         .pcard-img img{position:absolute;inset:14px;width:calc(100% - 28px);height:calc(100% - 28px);object-fit:contain;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
         .pcard:hover .pcard-img img{transform:scale(1.04)}
         .pcard.sel .pcard-img img{transform:scale(1.06)}
-        .pcard-noimg{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+        .pcard-noimg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--muted);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+        .pcard.nophoto{opacity:.78}
+        .pcard.nophoto:hover{opacity:.95}
+        .pcard.nophoto .pcard-img{background:repeating-linear-gradient(45deg,var(--bg) 0 9px,#fff 9px 18px)}
+        .pwarn{margin-left:auto;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);font-weight:700;background:var(--accent-soft);border:1px solid var(--accent);padding:2px 7px;border-radius:99px}
 
         .pcard-veil{position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(167,77,74,.08) 100%);opacity:0;transition:opacity .25s;pointer-events:none}
         .pcard.sel .pcard-veil{opacity:1}

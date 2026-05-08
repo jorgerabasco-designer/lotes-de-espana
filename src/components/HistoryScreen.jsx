@@ -2,15 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { I } from './icons.jsx';
 
 const DensityIcon = ({ n }) => {
-  const cells = n === 3 ? [[0,0],[1,0],[2,0]] : n === 4 ? [[0,0],[1,0],[2,0],[3,0]] : [[0,0],[1,0],[2,0],[3,0],[4,0],[5,0]];
-  const sz = n === 3 ? 4.5 : n === 4 ? 3.5 : 2.2;
-  const gap = n === 3 ? 1.6 : n === 4 ? 1.4 : 1;
+  const sz = n <= 4 ? 3.5 : n <= 6 ? 2.2 : 1.5;
+  const gap = n <= 4 ? 1.4 : n <= 6 ? 1 : 0.7;
   const total = n * sz + (n - 1) * gap;
   const off = (16 - total) / 2;
   return (
     <svg width="16" height="14" viewBox="0 0 16 14" fill="none">
-      {cells.map(([x], i) => (
-        <rect key={i} x={off + x * (sz + gap)} y="3.5" width={sz} height="7" rx="1" fill="currentColor"/>
+      {Array.from({ length: n }, (_, i) => (
+        <rect key={i} x={off + i * (sz + gap)} y="3.5" width={sz} height="7" rx="1" fill="currentColor"/>
       ))}
     </svg>
   );
@@ -44,7 +43,7 @@ function bucketLabel(d) {
 export default function HistoryScreen({ products, history, onRename, onDelete }) {
   const [range, setRange] = useState('all');
   const [q, setQ] = useState('');
-  const [cols, setCols] = useState(() => Number(localStorage.getItem('hist-cols')) || 3);
+  const [cols, setCols] = useState(() => Number(localStorage.getItem('hist-cols')) || 4);
   const setColsP = (n) => { setCols(n); localStorage.setItem('hist-cols', String(n)); };
   const [lightbox, setLightbox] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -133,7 +132,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
           )}
         </div>
         <div className="density">
-          {[3, 4, 6].map(n => (
+          {[4, 6, 8].map(n => (
             <button key={n} className={`dens ${cols === n ? 'on' : ''}`} onClick={() => setColsP(n)} title={`${n} columnas`}>
               <DensityIcon n={n}/>
             </button>
@@ -192,7 +191,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
                       </div>
                     )}
                     <div className="hmeta">{it.date}</div>
-                    {cols < 6 && (it.skus || []).length > 0 && (
+                    {cols < 8 && (it.skus || []).length > 0 && (
                       <div className="hsku-row">
                         {(it.skus || []).slice(0, 4).map(s => <span key={s} className="hsku">{s}</span>)}
                         {(it.skus || []).length > 4 && <span className="hsku more">+{it.skus.length - 4}</span>}
@@ -200,7 +199,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
                     )}
                     <div className="hact" onClick={e => e.stopPropagation()}>
                       <button className="hbtn danger" title="Eliminar" onClick={()=>onDelete && onDelete(it.id)}>{I.trash({ size: 14 })}</button>
-                      <button className="hbtn primary" onClick={()=>{ if(it.image){ window.open(it.image,'_blank'); } }}>{I.download({ size: 13 })} {cols < 6 && 'Descargar'}</button>
+                      <button className="hbtn primary" onClick={()=>{ if(it.image){ window.open(it.image,'_blank'); } }}>{I.download({ size: 13 })} {cols < 8 && 'Descargar'}</button>
                     </div>
                   </div>
                 </div>

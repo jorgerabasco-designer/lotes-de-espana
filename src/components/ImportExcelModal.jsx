@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { I } from './icons.jsx';
-import { CAT_LABELS } from '../lib/constants.js';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 
 const FIELD_ALIASES = {
   ref:   ['ref','referencia','rp','sku','codigo','código'],
@@ -46,6 +46,7 @@ export default function ImportExcelModal({ open, onClose, onImport }) {
   const [colMap, setColMap] = useState({});
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
+  const { catLabels } = useTaxonomy();
 
   if (!open) return null;
 
@@ -216,7 +217,7 @@ export default function ImportExcelModal({ open, onClose, onImport }) {
                     <span className="ie-mono">{p.sku}</span>
                     <span className="ie-name">{p.name}</span>
                     <span>{p.brand}</span>
-                    <span className="ie-cat">{CAT_LABELS[p.cat] || p.cat}</span>
+                    <span className="ie-cat">{catLabels[p.cat] || p.cat}</span>
                     <span className="ie-mono">{p.h}×{p.w}×{p.d}</span>
                   </div>
                 ))}

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { I } from './icons.jsx';
-import { CAT_LABELS } from '../lib/constants.js';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 
 export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [confirmDel, setConfirmDel] = useState(null);
 
-  const cats = [{ id: 'all', label: 'Todos' }, ...Object.entries(CAT_LABELS).map(([id, label]) => ({ id, label }))];
+  const { categories, catLabels } = useTaxonomy();
+  const cats = [{ id: 'all', label: 'Todos' }, ...categories.map(c => ({ id: c.id, label: c.label }))];
   const filtered = products.filter(p => {
     if (cat !== 'all' && p.cat !== cat) return false;
     if (q && !(p.name + p.brand + p.sku).toLowerCase().includes(q.toLowerCase())) return false;
@@ -56,7 +57,7 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
               <div className="pc-brand">{p.brand}</div>
             </div>
             <div className="pc-sku mono">{p.sku}</div>
-            <div className="pc-cat"><span className="cat-tag">{CAT_LABELS[p.cat] || p.cat}</span></div>
+            <div className="pc-cat"><span className="cat-tag">{catLabels[p.cat] || p.cat}</span></div>
             <div className="pc-dim mono">{p.h}×{p.w}×{p.d} cm</div>
             <div className="pc-act">
               <button className="iconbtn-l danger" onClick={(e) => { e.stopPropagation(); setConfirmDel(p); }} title="Eliminar">{I.trash({ size: 15 })}</button>

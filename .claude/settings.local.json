@@ -15,7 +15,9 @@
       "Bash(grep -E '^\\(node|npm\\)$')",
       "Read(//opt/homebrew/bin/**)",
       "Bash(mdfind -name 'node')",
-      "Bash(grep -i '/bin/node$')"
+      "Bash(grep -i '/bin/node$')",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

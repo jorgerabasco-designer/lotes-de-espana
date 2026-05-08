@@ -2,13 +2,39 @@ import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
 import { DEFAULT_PROMPT_TEMPLATE } from '../lib/constants.js';
 import { getSetting, setSetting } from '../lib/api.js';
+import { SUPABASE_READY } from '../lib/supabase.js';
+import { importSeedProducts, SEED_PRODUCTS } from '../lib/seed.js';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 
-export default function SettingsScreen() {
+export default function SettingsScreen({ products = [], onProductsChanged }) {
   const [section, setSection] = useState('prompt');
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT_TEMPLATE);
   const [savedAt, setSavedAt] = useState(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const tax = useTaxonomy();
+  const [seedBusy, setSeedBusy] = useState(false);
+  const [seedProgress, setSeedProgress] = useState(null);
+  const [seedDone, setSeedDone] = useState(false);
+
+  const handleImportSeed = async () => {
+    if (!confirm(`Se subirán ${SEED_PRODUCTS.length} productos demo (con sus imágenes) a tu Supabase. ¿Continuar?`)) return;
+    setSeedBusy(true);
+    setSeedDone(false);
+    try {
+      await importSeedProducts({
+        onProgress: (p) => setSeedProgress(p),
+      });
+      setSeedDone(true);
+      onProductsChanged && (await onProductsChanged());
+    } catch (e) {
+      alert('Error importando datos demo: ' + (e.message || e));
+    } finally {
+      setSeedBusy(false);
+      setTimeout(() => setSeedProgress(null), 1500);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -39,9 +65,14 @@ export default function SettingsScreen() {
     setTimeout(() => setCopied(false), 1400);
   };
 
+  // Cuentas de productos por categoría/tag
+  const catCount = (id) => products.filter(p => p.cat === id).length;
+  const tagCount = (id) => products.filter(p => (p.tags || []).includes(id)).length;
+
   const sections = [
-    { id: 'prompt', label: 'Prompt de generación', desc: 'Plantilla base IA (Gemini)' },
-    { id: 'about',  label: 'Acerca de',           desc: 'Lotes de España · Studio' },
+    { id: 'prompt',   label: 'Prompt de generación', desc: 'Plantilla base IA (Gemini)' },
+    { id: 'taxonomy', label: 'Categorías y tags',    desc: 'Organización del catálogo' },
+    { id: 'about',    label: 'Acerca de',            desc: 'Lotes de España · Studio' },
   ];
 
   return (
@@ -102,6 +133,41 @@ export default function SettingsScreen() {
             </div>
           )}
 
+          {section === 'taxonomy' && (
+            <div className="set-block">
+              <div className="set-blockh">
+                <h3>Categorías y etiquetas</h3>
+                <p>Define las categorías y etiquetas que aparecerán al subir o editar un producto, así como en los filtros del catálogo y de la barra lateral.</p>
+              </div>
+
+              <TaxonomyEditor
+                title="Categorías"
+                subtitle="Agrupan los productos en el catálogo y la barra lateral."
+                items={tax.categories}
+                count={catCount}
+                onAdd={tax.addCategory}
+                onUpdate={tax.updateCategory}
+                onRemove={tax.removeCategory}
+                placeholder="Nueva categoría — p. ej. Embutidos"
+                pillStyle={false}
+              />
+
+              <div className="tax-divider"/>
+
+              <TaxonomyEditor
+                title="Etiquetas"
+                subtitle="Atributos rápidos como Bio, Vegano o Sin gluten que se asignan a cada producto."
+                items={tax.tags}
+                count={tagCount}
+                onAdd={tax.addTag}
+                onUpdate={tax.updateTag}
+                onRemove={tax.removeTag}
+                placeholder="Nueva etiqueta — p. ej. Artesano"
+                pillStyle={true}
+              />
+            </div>
+          )}
+
           {section === 'about' && (
             <div className="set-block">
               <div className="set-blockh">
@@ -115,6 +181,33 @@ export default function SettingsScreen() {
                 <li><strong>Hosting:</strong> Netlify</li>
                 <li><strong>Repositorio:</strong> GitHub (auto-deploy en cada commit)</li>
               </ul>
+
+              <div className="seed-block">
+                <div className="seed-h">
+                  <div>
+                    <div className="seed-t">Importar productos de demostración</div>
+                    <div className="seed-s">
+                      Sube de un golpe los {SEED_PRODUCTS.length} productos de muestra (vino, AOVE, turrones, conservas, snacks…) con sus fotos a tu Supabase. Útil para probar la app sin tener que rellenar el catálogo desde cero.
+                    </div>
+                  </div>
+                </div>
+                {!SUPABASE_READY && (
+                  <div className="seed-warn">
+                    Supabase no está conectado en esta página. Configura las variables <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> primero.
+                  </div>
+                )}
+                {seedProgress && seedBusy && (
+                  <div className="seed-progress">
+                    Subiendo {seedProgress.current}… ({seedProgress.done}/{seedProgress.total})
+                  </div>
+                )}
+                {seedDone && (
+                  <div className="seed-done">{I.check({ size: 14 })} Importación completada — {SEED_PRODUCTS.length} productos disponibles en el catálogo.</div>
+                )}
+                <button className="btn btn-primary" onClick={handleImportSeed} disabled={!SUPABASE_READY || seedBusy}>
+                  {I.upload({ size: 14 })} {seedBusy ? 'Importando…' : 'Importar productos demo'}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -170,10 +263,146 @@ export default function SettingsScreen() {
         .about-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--ink-2);line-height:1.5}
         .about-list strong{color:var(--ink);font-weight:600;margin-right:6px}
 
+        .seed-block{margin-top:32px;padding-top:28px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:14px;align-items:flex-start}
+        .seed-h{display:flex;justify-content:space-between;gap:24px;width:100%}
+        .seed-t{font-family:'Fraunces',serif;font-size:18px;font-weight:500;color:var(--ink);letter-spacing:-.01em}
+        .seed-s{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.55;max-width:62ch}
+        .seed-warn{padding:10px 14px;background:rgba(167,77,74,.06);border:1px solid var(--accent-soft);border-radius:9px;font-size:12.5px;color:var(--accent);width:100%}
+        .seed-warn code{font-family:ui-monospace,Menlo,monospace;background:#fff;padding:1px 5px;border-radius:4px;font-size:11.5px}
+        .seed-progress{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+        .seed-done{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:rgba(58,122,90,.08);border:1px solid rgba(58,122,90,.3);border-radius:8px;font-size:12.5px;color:#3a7a5a;font-weight:600}
+
+        .tax-section{display:flex;flex-direction:column;gap:14px}
+        .tax-h{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:2px}
+        .tax-t{font-family:'Fraunces',serif;font-size:18px;font-weight:500;color:var(--ink);letter-spacing:-.01em}
+        .tax-s{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5;max-width:52ch}
+        .tax-count{font-family:'Fraunces',serif;font-size:22px;font-weight:500;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 14px;font-variant-numeric:tabular-nums}
+
+        .tax-list{display:flex;flex-direction:column;gap:6px}
+        .tax-item{display:flex;align-items:center;gap:14px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:10px;transition:all .12s}
+        .tax-item:hover{border-color:#cdc4b3}
+        .tax-label-wrap{flex:1;display:flex;align-items:center;gap:8px;min-width:0}
+        .tax-label{font-size:13.5px;font-weight:600;color:var(--ink);background:transparent;border:1px solid transparent;border-radius:7px;padding:5px 8px;outline:none;flex:1;min-width:0;width:100%}
+        .tax-label:focus{border-color:var(--accent);background:var(--paper);box-shadow:0 0 0 3px var(--accent-soft)}
+        .tax-label.editing{border-color:var(--accent);background:var(--paper);box-shadow:0 0 0 3px var(--accent-soft)}
+        .tax-meta{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;background:var(--bg);padding:3px 9px;border-radius:99px;font-weight:600;white-space:nowrap}
+        .tax-del{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--muted);background:transparent;transition:all .12s;flex-shrink:0}
+        .tax-del:hover{color:var(--accent);background:var(--accent-soft)}
+        .tax-del:disabled{opacity:.4;cursor:not-allowed}
+
+        .tax-list.tag-list{flex-direction:row;flex-wrap:wrap;gap:6px}
+        .tag-item{display:inline-flex;align-items:center;gap:6px;padding:6px 6px 6px 14px;background:#fff;border:1px solid var(--line);border-radius:99px;font-size:12.5px;color:var(--ink);font-weight:600;transition:all .12s}
+        .tag-item:hover{border-color:#cdc4b3}
+        .tag-item .tax-label{font-size:12.5px;padding:2px 6px}
+        .tag-meta{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;font-weight:600;background:var(--bg);min-width:18px;height:18px;display:grid;place-items:center;border-radius:99px;padding:0 6px}
+        .tag-del{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:var(--muted);background:transparent;transition:all .12s}
+        .tag-del:hover{color:#fff;background:var(--accent)}
+
+        .tax-add{display:flex;gap:8px;align-items:center;margin-top:4px}
+        .tax-add input{flex:1;padding:10px 13px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:13px;color:var(--ink);outline:none;transition:all .15s;font-family:inherit}
+        .tax-add input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+        .tax-add .btn{flex-shrink:0;height:38px}
+        .tax-divider{height:1px;background:var(--line);margin:32px 0}
+
         @media (max-width: 900px){
           .set-layout{grid-template-columns:1fr}
         }
       `}</style>
     </section>
+  );
+}
+
+function TaxonomyEditor({ title, subtitle, items, count, onAdd, onUpdate, onRemove, placeholder, pillStyle }) {
+  const [draft, setDraft] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+
+  const handleAdd = () => {
+    const ok = onAdd(draft);
+    if (ok) setDraft('');
+    else if (draft.trim()) alert('Esa entrada ya existe.');
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.id);
+    setEditValue(item.label);
+  };
+  const commitEdit = () => {
+    if (editingId && editValue.trim()) onUpdate(editingId, editValue.trim());
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const handleRemove = (item) => {
+    const used = count(item.id);
+    let msg = `¿Eliminar "${item.label}"?`;
+    if (used > 0) {
+      msg += `\n\nEsta entrada está usada por ${used} ${used === 1 ? 'producto' : 'productos'}. Esos productos NO se borran, solo perderán esta clasificación.`;
+    }
+    if (confirm(msg)) onRemove(item.id);
+  };
+
+  return (
+    <div className="tax-section">
+      <div className="tax-h">
+        <div>
+          <div className="tax-t">{title}</div>
+          <div className="tax-s">{subtitle}</div>
+        </div>
+        <div className="tax-count">{items.length}</div>
+      </div>
+
+      <div className={`tax-list ${pillStyle ? 'tag-list' : ''}`}>
+        {items.map(item => {
+          const used = count(item.id);
+          const isEditing = editingId === item.id;
+          if (pillStyle) {
+            return (
+              <div key={item.id} className="tag-item">
+                <input
+                  className={`tax-label ${isEditing ? 'editing' : ''}`}
+                  value={isEditing ? editValue : item.label}
+                  onFocus={() => startEdit(item)}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={commitEdit}
+                  onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setEditingId(null); e.target.blur(); }}}
+                  style={{ width: `${Math.max(item.label.length, 4) + 2}ch` }}
+                />
+                <span className="tag-meta" title={`${used} productos`}>{used}</span>
+                <button type="button" className="tag-del" onClick={() => handleRemove(item)} title="Eliminar">{I.close({ size: 11 })}</button>
+              </div>
+            );
+          }
+          return (
+            <div key={item.id} className="tax-item">
+              <div className="tax-label-wrap">
+                <input
+                  className={`tax-label ${isEditing ? 'editing' : ''}`}
+                  value={isEditing ? editValue : item.label}
+                  onFocus={() => startEdit(item)}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={commitEdit}
+                  onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setEditingId(null); e.target.blur(); }}}
+                />
+              </div>
+              <span className="tax-meta">{used} {used === 1 ? 'producto' : 'productos'}</span>
+              <button type="button" className="tax-del" onClick={() => handleRemove(item)} title="Eliminar">{I.close({ size: 12 })}</button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="tax-add">
+        <input
+          placeholder={placeholder}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
+        />
+        <button className="btn btn-primary" onClick={handleAdd} disabled={!draft.trim()}>
+          {I.plus({ size: 13 })} Añadir
+        </button>
+      </div>
+    </div>
   );
 }
