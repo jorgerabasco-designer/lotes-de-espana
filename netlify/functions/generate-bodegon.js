@@ -9,7 +9,15 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const DEFAULT_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+// Lista de modelos a probar en orden. Si la env var GEMINI_IMAGE_MODEL está definida, va primero.
+// Si Google cambia los nombres en el futuro, añade el nuevo aquí o úsalo como env var.
+const MODEL_FALLBACKS = [
+  process.env.GEMINI_IMAGE_MODEL,
+  'gemini-2.5-flash-image',
+  'gemini-2.5-flash-image-preview',
+  'gemini-2.0-flash-preview-image-generation',
+  'gemini-2.0-flash-exp-image-generation',
+].filter(Boolean);
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
 The result must look like a clean, polished product hero shot for an online catalog or product listing page — NOT a lifestyle photo, NOT a flat lay, NOT a holiday/Christmas decorative scene.
@@ -175,40 +183,78 @@ export const handler = async (event) => {
     prompt_usado: prompt,
   });
 
-  // 6) Llamar a Gemini
+  // 6) Llamar a Gemini — probamos varios modelos por si alguno está deprecado
   let imageBase64 = null;
   let imageMime = 'image/png';
-  try {
-    const parts = [{ text: prompt }];
-    for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+  let usedModel = null;
+  let lastError = null;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_MODEL}:generateContent?key=${geminiKey}`;
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: {
-          responseModalities: ['IMAGE'],
-        },
-      }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j?.error?.message || `Gemini ${r.status}`);
+  const parts = [{ text: prompt }];
+  for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
 
-    const cand = j?.candidates?.[0];
-    const partsOut = cand?.content?.parts || [];
-    for (const part of partsOut) {
-      if (part.inlineData?.data) {
-        imageBase64 = part.inlineData.data;
-        imageMime = part.inlineData.mimeType || 'image/png';
+  for (const model of MODEL_FALLBACKS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts }],
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        lastError = j?.error?.message || `HTTP ${r.status}`;
+        console.warn(`[Gemini] Modelo ${model} falló:`, lastError);
+        continue;
+      }
+      const cand = j?.candidates?.[0];
+      const partsOut = cand?.content?.parts || [];
+      for (const part of partsOut) {
+        if (part.inlineData?.data) {
+          imageBase64 = part.inlineData.data;
+          imageMime = part.inlineData.mimeType || 'image/png';
+          usedModel = model;
+          break;
+        }
+      }
+      if (imageBase64) {
+        console.log(`[Gemini] Imagen generada con ${model}`);
         break;
       }
+      lastError = 'el modelo respondió sin imagen.';
+    } catch (e) {
+      lastError = e.message || String(e);
+      console.warn(`[Gemini] Modelo ${model} excepción:`, lastError);
     }
-    if (!imageBase64) throw new Error('Gemini no devolvió ninguna imagen.');
-  } catch (e) {
-    await supabase.from('bodegones').update({ estado: 'failed', error_mensaje: String(e.message || e) }).eq('ref', ref);
-    return json(500, { error: 'Error generando con Gemini: ' + (e.message || e) });
+  }
+
+  if (!imageBase64) {
+    // Pedir lista de modelos disponibles para ayudar al usuario
+    let modelsHint = '';
+    try {
+      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
+      if (listRes.ok) {
+        const ld = await listRes.json();
+        const imageModels = (ld.models || [])
+          .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+          .map(m => (m.name || '').replace('models/', ''))
+          .filter(name => /image|imagen/i.test(name));
+        if (imageModels.length) {
+          modelsHint = `\n\nModelos de imagen disponibles para tu API key: ${imageModels.join(', ')}. ` +
+                       `Configura GEMINI_IMAGE_MODEL en Netlify con uno de esos.`;
+        } else {
+          modelsHint = '\n\nNo hay modelos de imagen disponibles para tu API key. ' +
+                       'Probablemente el proyecto de Google AI Studio no tiene activado el modelo Imagen / Image generation. ' +
+                       'Crea otra API key desde aistudio.google.com con un proyecto que sí lo tenga.';
+        }
+      }
+    } catch {}
+
+    const msg = `Error generando con Gemini: ${lastError}${modelsHint}`;
+    await supabase.from('bodegones').update({ estado: 'failed', error_mensaje: msg }).eq('ref', ref);
+    return json(500, { error: msg });
   }
 
   // 7) Guardar la imagen en Supabase Storage
