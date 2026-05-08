@@ -10,13 +10,13 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Lista de modelos a probar en orden. Si la env var GEMINI_IMAGE_MODEL está definida, va primero.
-// Si Google cambia los nombres en el futuro, añade el nuevo aquí o úsalo como env var.
+// Orden actualizado a los modelos vigentes en 2026 (Gemini 3 + 2.5).
 const MODEL_FALLBACKS = [
   process.env.GEMINI_IMAGE_MODEL,
+  'gemini-3.1-flash-image-preview',
+  'gemini-3-pro-image-preview',
   'gemini-2.5-flash-image',
   'gemini-2.5-flash-image-preview',
-  'gemini-2.0-flash-preview-image-generation',
-  'gemini-2.0-flash-exp-image-generation',
 ].filter(Boolean);
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
