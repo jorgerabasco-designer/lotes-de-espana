@@ -28,6 +28,12 @@ ABSOLUTE PRIORITY — PACKAGING FIDELITY (NON-NEGOTIABLE)
 The products in the attached reference images MUST appear in the
 output IDENTICAL to the references — pixel-perfect, label-accurate.
 
+GROUND TRUTH HIERARCHY:
+The attached reference images are the ABSOLUTE GROUND TRUTH. The
+text descriptions below are supplementary metadata only. If text
+and image conflict, ALWAYS trust the image and ignore the text.
+NEVER use text as a license to redesign packaging.
+
 You are ONLY allowed to change: position, orientation, lighting.
 You are STRICTLY FORBIDDEN to change: any logo, brand name, text,
 typography, illustration, colour, shape, cap, lid, ribbon or finish.
@@ -36,6 +42,11 @@ If you cannot reproduce a label perfectly, copy it from the
 reference image as a flat texture. NEVER hallucinate, simplify or
 invent packaging design. The viewer MUST be able to read every
 brand name and every line of label text exactly as in the reference.
+
+REFERENCE IMAGE MAPPING:
+"PRODUCT #N — REFERENCE IMAGE #N" maps each product description
+to its reference image. The reference images are attached to this
+request in the same order the products are listed.
 
 PRODUCTS TO INCLUDE
 Use the attached reference images EXACTLY as shown. Do NOT redesign, recolor, retypeset or rewrite any label, logo, brand name or text on the packaging. Preserve every typography, color, illustration and detail of the original packaging with photographic, label-accurate fidelity. The viewer must be able to clearly read all brand names.
@@ -104,12 +115,25 @@ function placeInstruction(product) {
 function buildProductsBlock(products) {
   const order = { TRASERA: 0, MEDIA: 1, DELANTERA: 2 };
   const sorted = [...products].sort((a, b) => order[placeFor(a)] - order[placeFor(b)]);
-  return sorted.map(p => {
+
+  return sorted.map((p, idx) => {
     const { zoneEng, instr } = placeInstruction(p);
-    const desc = p.descripcion_visual || `${p.tipo_envase || 'package'}, ${p.color_dominante || ''}`.trim();
-    const notes = p.notas ? ` ${p.notas}` : '';
-    return `- ${p.marca || ''} ${p.nombre}, ${desc}. Real physical size: ${p.alto} × ${p.ancho} × ${p.fondo} cm. Place in the ${zoneEng} zone, ${instr}.${notes}`;
-  }).join('\n');
+    const lines = [];
+
+    lines.push(`PRODUCT #${idx + 1} — REFERENCE IMAGE #${idx + 1}`);
+    lines.push(`  Brand: ${p.marca || '(unknown)'}`);
+    lines.push(`  Name: ${p.nombre}`);
+    if (p.categoria_id || p.categoria) lines.push(`  Category: ${p.categoria_id || p.categoria}`);
+    if (p.tipo_envase) lines.push(`  Packaging type: ${p.tipo_envase}`);
+    if (p.color_dominante) lines.push(`  Dominant colours: ${p.color_dominante}`);
+    if (p.descripcion_visual) lines.push(`  Visual description: ${p.descripcion_visual}`);
+    if (Array.isArray(p.tags) && p.tags.length) lines.push(`  Attributes: ${p.tags.join(', ')}`);
+    lines.push(`  Real physical size: ${p.alto} × ${p.ancho} × ${p.fondo} cm`);
+    lines.push(`  Position: ${zoneEng} tier — ${instr}`);
+    if (p.notas) lines.push(`  Notes: ${p.notas}`);
+
+    return lines.join('\n');
+  }).join('\n\n');
 }
 
 async function fetchAsBase64(url) {

@@ -98,9 +98,13 @@ export default function BodegonOverlay({
   if (!open) return null;
 
   return (
-    <div className="bo-back" onClick={handleClose}>
+    <div className="bo-back">
       <div className="bo-modal" onClick={e => e.stopPropagation()}>
-        <button className="bo-close" onClick={handleClose} title="Cerrar">{I.close({ size: 18 })}</button>
+        <button
+          className="bo-close"
+          onClick={handleClose}
+          title="Cerrar (descarta el bodegón si no lo has guardado)"
+        >{I.close({ size: 18 })}</button>
 
         <div className="bo-stage-wrap">
           <div className={`bo-stage ${generating ? 'busy' : ''}`}>
@@ -229,9 +233,20 @@ export default function BodegonOverlay({
       </div>
 
       {zoomed && generated?.image && (
-        <div className="bo-zoom-bg" onClick={() => setZoomed(false)}>
-          <button className="bo-zoom-close" onClick={(e)=>{e.stopPropagation();setZoomed(false);}}>{I.close({ size: 22 })}</button>
-          <img className="bo-zoom-img" src={generated.image} alt={title} onClick={(e)=>e.stopPropagation()}/>
+        <div
+          className="bo-zoom-bg"
+          onClick={(e) => { e.stopPropagation(); setZoomed(false); }}
+        >
+          <button
+            className="bo-zoom-close"
+            onClick={(e) => { e.stopPropagation(); setZoomed(false); }}
+          >{I.close({ size: 22 })}</button>
+          <img
+            className="bo-zoom-img"
+            src={generated.image}
+            alt={title}
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
 

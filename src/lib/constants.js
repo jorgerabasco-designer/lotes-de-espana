@@ -39,6 +39,15 @@ This is the SINGLE most important rule of the entire prompt:
 the products in the attached reference images MUST appear in the
 output IDENTICAL to the references — pixel-perfect, label-accurate.
 
+GROUND TRUTH HIERARCHY:
+The attached reference images are the ABSOLUTE GROUND TRUTH for
+how each product looks. Any text description (brand, colours,
+visual description, etc.) below is supplementary metadata used
+ONLY for compositional reasoning. If text and reference image
+ever appear to contradict, ALWAYS trust the image and ignore the
+text. NEVER use text descriptions as a license to redesign or
+"clean up" what the reference image shows.
+
 You are ONLY allowed to change:
   - the product's POSITION in the composition
   - the product's ORIENTATION (rotation around its vertical axis,
@@ -59,6 +68,12 @@ image as a flat texture rather than re-drawing it. NEVER hallucinate
 or simplify packaging design. NEVER invent variants or "similar"
 products. The viewer of the final image MUST be able to read every
 brand name and every line of label text exactly as in the reference.
+
+REFERENCE IMAGE MAPPING:
+The product list below uses "PRODUCT #N — REFERENCE IMAGE #N" to
+explicitly map each product description to its reference image.
+The reference images are attached to this request in the same order
+the products are listed.
 
 PRODUCTS TO INCLUDE
 Use the attached reference images EXACTLY as shown. Do NOT redesign, recolor, retypeset or rewrite any label, logo, brand name or text on the packaging. Preserve every typography, color, illustration and detail of the original packaging with photographic, label-accurate fidelity. The viewer must be able to clearly read all brand names.
