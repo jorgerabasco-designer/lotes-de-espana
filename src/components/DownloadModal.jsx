@@ -104,17 +104,21 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
       doc.setLineWidth(0.3);
       doc.line(margin, 32, pageW - margin, 32);
 
-      // ---- Título del bodegón (Fraunces-style con Times) ----
-      let cursorY = 48;
+      // ---- Título del bodegón (serif Times) ----
+      // El texto se posiciona por baseline en jsPDF. Para que la primera línea
+      // del título empiece justo bajo la banda con respiro, baseline = top + cap.
+      const titleSize = 28; // pt
+      const titleLineH = 11; // mm — line-height generoso para 28pt
+      let cursorY = 32 + 14 + (titleSize * 0.353);
       doc.setFont('times', 'normal');
-      doc.setFontSize(28);
+      doc.setFontSize(titleSize);
       doc.setTextColor(...ink);
       const title = bodegon.title || 'Bodegón';
       const titleLines = doc.splitTextToSize(title, pageW - margin * 2);
-      doc.text(titleLines, margin, cursorY);
-      cursorY += titleLines.length * 9;
+      doc.text(titleLines, margin, cursorY, { baseline: 'alphabetic' });
+      cursorY += (titleLines.length - 1) * titleLineH + 12;
 
-      // ---- Imagen del bodegón ----
+      // ---- Imagen del bodegón (sin marco, alineada a margen izquierdo) ----
       const res = await fetch(bodegon.image, { mode: 'cors' });
       const blob = await res.blob();
       const dataUrl = await new Promise((resolve, reject) => {
@@ -133,73 +137,84 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
         imgH = maxImgH;
         imgW = imgH * imgRatio;
       }
-      const imgX = (pageW - imgW) / 2;
-      cursorY += 6;
+      const imgX = (pageW - imgW) / 2; // centrada horizontalmente bajo el título
 
-      // Sombra suave alrededor de la imagen (3 capas con poca opacidad)
-      // (jsPDF no soporta sombras directamente, simulamos con un rect tras la imagen)
-      doc.setFillColor(...line);
-      doc.roundedRect(imgX - 1, cursorY - 1, imgW + 2, imgH + 2, 2, 2, 'F');
       doc.addImage(dataUrl, 'JPEG', imgX, cursorY, imgW, imgH, undefined, 'FAST');
-      cursorY += imgH + 14;
+      cursorY += imgH + 16;
 
       // ---- Descripción ----
       if (bodegon.description) {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8.5);
         doc.setTextColor(...muted);
-        doc.text('DESCRIPCIÓN', margin, cursorY);
-        cursorY += 6;
+        doc.text('DESCRIPCIÓN', margin, cursorY, { baseline: 'alphabetic' });
+        cursorY += 7;
+
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(10.5);
         doc.setTextColor(...ink2);
         const descLines = doc.splitTextToSize(bodegon.description, pageW - margin * 2);
-        doc.text(descLines, margin, cursorY);
-        cursorY += descLines.length * 5.2 + 8;
+        doc.text(descLines, margin, cursorY, { baseline: 'alphabetic', lineHeightFactor: 1.45 });
+        cursorY += descLines.length * 5.4 + 10;
       }
 
       // ---- Productos ----
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
       doc.setTextColor(...muted);
-      doc.text(`PRODUCTOS INCLUIDOS · ${(bodegon.skus || []).length}`, margin, cursorY);
-      cursorY += 7;
+      doc.text(`PRODUCTOS INCLUIDOS · ${(bodegon.skus || []).length}`, margin, cursorY, { baseline: 'alphabetic' });
+      cursorY += 8;
 
       const skuList = bodegon.skus || [];
       doc.setLineWidth(0.2);
       doc.setDrawColor(...line);
 
+      // Layout de fila de producto:
+      //   bullet   |   nombre / marca         |     ref. (derecha)
+      //   2mm      |   resto del ancho        |
+      const bulletX = margin + 1.4;
+      const textX = margin + 6;
+      const rowH = 11;       // alto reservado por fila
+      const nameBaseline = 4.2; // mm desde el top de la fila al baseline del nombre
+      const brandBaseline = 8.6; // mm desde el top de la fila al baseline de marca
+
       for (const sku of skuList) {
         const p = (products || []).find(x => x.sku === sku);
-        if (cursorY > pageH - 30) {
+        if (cursorY + rowH > pageH - 16) {
           doc.addPage();
           cursorY = margin;
         }
         if (p) {
-          // Fila con bullet, nombre y referencia a la derecha
+          // Bullet alineado con el baseline visual del nombre (cap height ~ 2.6 mm para 11pt)
           doc.setFillColor(...olive);
-          doc.circle(margin + 1.5, cursorY - 1.5, 0.9, 'F');
+          doc.circle(bulletX, cursorY + nameBaseline - 1.3, 0.9, 'F');
+
+          // Nombre
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(11);
           doc.setTextColor(...ink);
-          doc.text(p.name, margin + 6, cursorY);
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          doc.setTextColor(...muted);
-          doc.text(p.brand, margin + 6, cursorY + 4.5);
+          doc.text(p.name, textX, cursorY + nameBaseline, { baseline: 'alphabetic' });
 
+          // Ref alineada al baseline del nombre
+          doc.setFont('helvetica', 'normal');
           doc.setFontSize(8);
           doc.setTextColor(...muted);
-          doc.text(`Ref. ${p.sku}`, pageW - margin, cursorY, { align: 'right' });
+          doc.text(`Ref. ${p.sku}`, pageW - margin, cursorY + nameBaseline, { baseline: 'alphabetic', align: 'right' });
 
-          cursorY += 9.5;
-          doc.line(margin + 6, cursorY - 2, pageW - margin, cursorY - 2);
+          // Marca
+          doc.setFontSize(9);
+          doc.setTextColor(...muted);
+          doc.text(p.brand, textX, cursorY + brandBaseline, { baseline: 'alphabetic' });
+
+          // Línea separadora
+          doc.line(textX, cursorY + rowH, pageW - margin, cursorY + rowH);
+          cursorY += rowH;
         } else {
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(10);
           doc.setTextColor(...ink2);
-          doc.text(`• ${sku}`, margin, cursorY);
-          cursorY += 6;
+          doc.text(`• ${sku}`, margin, cursorY + 4, { baseline: 'alphabetic' });
+          cursorY += 7;
         }
       }
 
