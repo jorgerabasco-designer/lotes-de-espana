@@ -34,6 +34,7 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [editInitialFile, setEditInitialFile] = useState(null);
 
   // Bodegón
   const [bodegonNumber, setBodegonNumber] = useState(1);
@@ -72,7 +73,10 @@ export default function App() {
   const clearSel = () => setSelected([]);
 
   const handleCreate = () => {
-    if (selected.length === 0) return;
+    if (selected.length < 2) {
+      alert('Selecciona al menos 2 productos para crear un bodegón.');
+      return;
+    }
     const missing = selected.filter(sku => {
       const p = products.find(x => x.sku === sku);
       return !p || !p.img;
@@ -90,21 +94,14 @@ export default function App() {
     setBodegonOpen(true);
   };
 
-  const handleSavedBodegon = (gen) => {
+  const handleSavedBodegon = async (gen) => {
     setBodegonOpen(false);
     setBodegonNumber(n => n + 1);
-    if (gen) {
-      setHistory(h => [{
-        id: gen.id || `tmp-${Date.now()}`,
-        n: gen.n || bodegonNumber,
-        title: gen.title || bodegonTitle,
-        description: bodegonDesc,
-        skus: selected,
-        image: gen.image || null,
-        image_path: gen.image_path || null,
-        created_at: new Date().toISOString(),
-      }, ...h]);
-    }
+    // Refrescar el historial desde la base de datos para que aparezca el guardado
+    try {
+      const bs = await listBodegones();
+      setHistory(bs);
+    } catch (e) { console.error(e); }
   };
 
   const handleDeletedBodegon = async (id) => {
@@ -114,8 +111,23 @@ export default function App() {
     setHistory(h => h.filter(x => x.id !== id));
   };
 
-  const openNew = () => { setEditProduct(null); setEditOpen(true); };
-  const openEdit = (p) => { setEditProduct(p); setEditOpen(true); };
+  const refreshHistory = async () => {
+    try {
+      const bs = await listBodegones();
+      setHistory(bs);
+    } catch (e) { console.error(e); }
+  };
+
+  const openNew = (initialFile) => {
+    setEditProduct(null);
+    setEditInitialFile(initialFile instanceof File ? initialFile : null);
+    setEditOpen(true);
+  };
+  const openEdit = (p) => {
+    setEditProduct(p);
+    setEditInitialFile(null);
+    setEditOpen(true);
+  };
 
   const handleSaveProduct = async (form) => {
     // Lanza si falla — el overlay captura y muestra el banner de error.
@@ -217,6 +229,7 @@ export default function App() {
           history={history}
           onRename={handleRenameBodegon}
           onDelete={handleDeletedBodegon}
+          onRefresh={refreshHistory}
         />
       )}
 
@@ -225,7 +238,8 @@ export default function App() {
       <ProductEditOverlay
         open={editOpen}
         product={editProduct}
-        onClose={() => setEditOpen(false)}
+        initialFile={editInitialFile}
+        onClose={() => { setEditOpen(false); setEditInitialFile(null); }}
         onSave={handleSaveProduct}
       />
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
-import { startBodegonGeneration, pollBodegon } from '../lib/api.js';
+import { startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon } from '../lib/api.js';
+import DownloadModal from './DownloadModal.jsx';
 
 export default function BodegonOverlay({
   open, onClose, products, selected,
@@ -13,6 +14,8 @@ export default function BodegonOverlay({
   const [error, setError] = useState(null);
   const [generated, setGenerated] = useState(null); // { id, image, image_path, title, description, skus }
   const [savedHint, setSavedHint] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+  const [dlOpen, setDlOpen] = useState(false);
 
   const sel = selected.map(s => products.find(p => p.sku === s)).filter(Boolean);
   const sorted = [...sel].sort((a, b) => b.h - a.h);
@@ -53,38 +56,51 @@ export default function BodegonOverlay({
 
   const handleSave = async () => {
     if (!generated) return;
-    setSavedHint(true);
-    setTimeout(() => {
-      setSavedHint(false);
-      onSaved && onSaved(generated);
-      onClose();
-    }, 700);
+    try {
+      const saved = await commitBodegon(generated.id, {
+        nombre: title,
+        descripcion: description || null,
+      });
+      setSavedHint(true);
+      setTimeout(() => {
+        setSavedHint(false);
+        onSaved && onSaved(saved || generated);
+        onClose();
+      }, 700);
+    } catch (e) {
+      setError(e.message || 'Error guardando en historial.');
+    }
   };
 
   const handleDelete = async () => {
-    if (generated && generated.id) {
-      onDeleted && onDeleted(generated.id);
+    try {
+      if (generated?.id) await discardBodegon(generated.id);
+    } catch (e) {
+      console.warn('No se pudo descartar:', e);
+    }
+    if (generated?.id) onDeleted && onDeleted(generated.id);
+    onClose();
+  };
+
+  // Al cerrar el modal sin guardar, descartar el draft también
+  const handleClose = async () => {
+    if (generated?.id) {
+      try { await discardBodegon(generated.id); } catch {}
     }
     onClose();
   };
 
   const handleDownload = () => {
     if (!generated?.image) return;
-    const a = document.createElement('a');
-    a.href = generated.image;
-    a.download = `${title || 'bodegon'}.jpg`;
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    setDlOpen(true);
   };
 
   if (!open) return null;
 
   return (
-    <div className="bo-back" onClick={onClose}>
+    <div className="bo-back" onClick={handleClose}>
       <div className="bo-modal" onClick={e => e.stopPropagation()}>
-        <button className="bo-close" onClick={onClose} title="Cerrar">{I.close({ size: 18 })}</button>
+        <button className="bo-close" onClick={handleClose} title="Cerrar">{I.close({ size: 18 })}</button>
 
         <div className="bo-stage-wrap">
           <div className={`bo-stage ${generating ? 'busy' : ''}`}>
@@ -111,7 +127,10 @@ export default function BodegonOverlay({
             )}
 
             {!generating && !error && generated?.image && (
-              <img className="bo-img" src={generated.image} alt={title} />
+              <button type="button" className="bo-img-wrap" onClick={() => setZoomed(true)} title="Ampliar imagen">
+                <img className="bo-img" src={generated.image} alt={title} />
+                <span className="bo-zoom-hint">{I.expand({ size: 14 })} Ampliar</span>
+              </button>
             )}
 
             {!generating && !error && !generated?.image && (
@@ -174,7 +193,7 @@ export default function BodegonOverlay({
             className="bo-desc"
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="Añade una descripción gourmet — notas de cata, maridaje, ocasión…"
+            placeholder="Añade una descripción o notas sobre este lote…"
             rows={4}
           />
 
@@ -185,7 +204,7 @@ export default function BodegonOverlay({
                 <div className="bo-prod-img"><img src={p.img} alt=""/></div>
                 <div className="bo-prod-info">
                   <div className="bo-prod-n">{p.name}</div>
-                  <div className="bo-prod-m">{p.brand} · {p.h}×{p.w}×{p.d} cm</div>
+                  <div className="bo-prod-m">{p.brand}</div>
                 </div>
               </div>
             ))}
@@ -209,6 +228,20 @@ export default function BodegonOverlay({
         </aside>
       </div>
 
+      {zoomed && generated?.image && (
+        <div className="bo-zoom-bg" onClick={() => setZoomed(false)}>
+          <button className="bo-zoom-close" onClick={(e)=>{e.stopPropagation();setZoomed(false);}}>{I.close({ size: 22 })}</button>
+          <img className="bo-zoom-img" src={generated.image} alt={title} onClick={(e)=>e.stopPropagation()}/>
+        </div>
+      )}
+
+      <DownloadModal
+        open={dlOpen}
+        onClose={() => setDlOpen(false)}
+        bodegon={generated ? { ...generated, title, description, skus: selected, created_at: new Date().toISOString() } : null}
+        products={products}
+      />
+
       <style>{`
         .bo-back{position:fixed;inset:0;background:rgba(20,16,12,.62);backdrop-filter:blur(10px);z-index:500;display:grid;place-items:center;padding:32px;animation:fadeIn .25s ease}
         .bo-modal{position:relative;background:#fff;border-radius:20px;width:min(1180px,96vw);max-height:94vh;display:grid;grid-template-columns:1fr 380px;overflow:hidden;box-shadow:0 40px 100px -20px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.08);animation:popIn .3s cubic-bezier(.2,.8,.2,1)}
@@ -218,7 +251,18 @@ export default function BodegonOverlay({
         .bo-stage-wrap{position:relative;background:#fff;display:flex;align-items:center;justify-content:center;padding:30px 30px 80px;min-height:560px;border-right:1px solid var(--line)}
         .bo-stage{position:relative;width:100%;height:100%;min-height:480px;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}
         .bo-stage.busy{background:linear-gradient(135deg,#FAFAF7 0%,#F1ECDF 100%)}
-        .bo-img{width:100%;height:100%;max-height:100%;max-width:100%;object-fit:contain;object-position:center;display:block}
+        .bo-img-wrap{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:transparent;border:none;padding:0;cursor:zoom-in;overflow:hidden;border-radius:14px}
+        .bo-img{width:100%;height:100%;max-height:100%;max-width:100%;object-fit:contain;object-position:center;display:block;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+        .bo-img-wrap:hover .bo-img{transform:scale(1.015)}
+        .bo-zoom-hint{position:absolute;bottom:14px;right:14px;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;background:rgba(20,16,12,.75);backdrop-filter:blur(6px);color:#fff;font-size:11px;font-weight:600;letter-spacing:.04em;border-radius:99px;opacity:0;transition:opacity .2s;pointer-events:none}
+        .bo-img-wrap:hover .bo-zoom-hint{opacity:1}
+
+        .bo-zoom-bg{position:fixed;inset:0;background:rgba(20,16,12,.92);backdrop-filter:blur(12px);z-index:2000;display:flex;align-items:center;justify-content:center;padding:32px;cursor:zoom-out;animation:zoomFade .3s cubic-bezier(.2,.8,.2,1)}
+        @keyframes zoomFade{from{opacity:0}to{opacity:1}}
+        .bo-zoom-img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 30px 100px rgba(0,0,0,.6);cursor:default;animation:zoomIn .35s cubic-bezier(.2,.8,.2,1)}
+        @keyframes zoomIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+        .bo-zoom-close{position:fixed;top:24px;right:24px;width:46px;height:46px;border-radius:14px;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.2);z-index:2001;transition:all .15s;cursor:pointer}
+        .bo-zoom-close:hover{background:rgba(255,255,255,.25);transform:scale(1.06)}
 
         .bo-loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:0 24px}
         .bo-loading-orb{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#fff,var(--accent-soft));box-shadow:0 0 0 0 var(--accent-soft);animation:boOrb 1.4s ease-in-out infinite}

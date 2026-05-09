@@ -5,7 +5,7 @@ import { useTaxonomy } from '../lib/taxonomy.jsx';
 
 const EMPTY_PRODUCT = { sku: '', name: '', brand: '', cat: 'vinos', h: '', w: '', d: '', img: '', tags: [], desc: '', tipo_envase: '', color: '', posicion: '', descripcion_visual: '', notas: '' };
 
-export default function ProductEditOverlay({ open, product, onClose, onSave }) {
+export default function ProductEditOverlay({ open, product, initialFile, onClose, onSave }) {
   const isNew = !product?.sku;
   const [form, setForm] = useState(() => product ? { ...EMPTY_PRODUCT, ...product } : EMPTY_PRODUCT);
   const [pendingFile, setPendingFile] = useState(null);
@@ -27,7 +27,13 @@ export default function ProductEditOverlay({ open, product, onClose, onSave }) {
     setSavedSuccess(false);
     setErrorMsg(null);
     setBusy(false);
-  }, [product, open]);
+    // Si vienen con un archivo (drag&drop desde el catálogo), pre-cargarlo
+    if (open && initialFile instanceof File && initialFile.type.startsWith('image/')) {
+      setPendingFile(initialFile);
+      const url = URL.createObjectURL(initialFile);
+      setForm(f => ({ ...f, img: url }));
+    }
+  }, [product, open, initialFile]);
 
   if (!open) return null;
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));

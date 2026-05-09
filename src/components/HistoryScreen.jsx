@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { I } from './icons.jsx';
+import DownloadModal from './DownloadModal.jsx';
+import { clearAllBodegones } from '../lib/api.js';
 
 const DensityIcon = ({ n }) => {
   const sz = n <= 4 ? 3.5 : n <= 6 ? 2.2 : 1.5;
@@ -40,7 +42,7 @@ function bucketLabel(d) {
   return d === 0 ? 'Hoy' : d === 1 ? 'Ayer' : d <= 6 ? 'Esta semana' : d <= 30 ? 'Este mes' : 'Anteriores';
 }
 
-export default function HistoryScreen({ products, history, onRename, onDelete }) {
+export default function HistoryScreen({ products, history, onRename, onDelete, onRefresh }) {
   const [range, setRange] = useState('all');
   const [q, setQ] = useState('');
   const [cols, setCols] = useState(() => Number(localStorage.getItem('hist-cols')) || 4);
@@ -48,6 +50,25 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
   const [lightbox, setLightbox] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [rangeOpen, setRangeOpen] = useState(false);
+  const [dlOpen, setDlOpen] = useState(false);
+  const [dlBodegon, setDlBodegon] = useState(null);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearAll = async () => {
+    if (!confirm('Esto eliminará TODOS los bodegones del historial (también sus imágenes). Esta acción no se puede deshacer. ¿Continuar?')) return;
+    setClearing(true);
+    try {
+      const n = await clearAllBodegones();
+      onRefresh && (await onRefresh());
+      alert(`✓ ${n} bodegones eliminados.`);
+    } catch (e) {
+      alert('Error vaciando historial: ' + e.message);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const openDownload = (item) => { setDlBodegon(item); setDlOpen(true); };
 
   const items = useMemo(() => (history || []).map(it => ({
     ...it,
@@ -105,6 +126,11 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
           <h1 className="cat-title">Historial</h1>
           <p className="cat-sub">{filtered.length} composiciones · todas guardadas en alta resolución</p>
         </div>
+        {history && history.length > 0 && (
+          <button className="btn btn-ghost danger" onClick={handleClearAll} disabled={clearing}>
+            {I.trash({ size: 14 })} {clearing ? 'Vaciando…' : 'Vaciar historial'}
+          </button>
+        )}
       </header>
 
       <div className="toolbar">
@@ -199,7 +225,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
                     )}
                     <div className="hact" onClick={e => e.stopPropagation()}>
                       <button className="hbtn danger" title="Eliminar" onClick={()=>onDelete && onDelete(it.id)}>{I.trash({ size: 14 })}</button>
-                      <button className="hbtn primary" onClick={()=>{ if(it.image){ window.open(it.image,'_blank'); } }}>{I.download({ size: 13 })} {cols < 8 && 'Descargar'}</button>
+                      <button className="hbtn primary" onClick={(e)=>{ e.stopPropagation(); openDownload(it); }}>{I.download({ size: 13 })} {cols < 8 && 'Descargar'}</button>
                     </div>
                   </div>
                 </div>
@@ -245,7 +271,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
                 })}
               </div>
               <div className="lb-actions">
-                <button className="hbtn primary" onClick={()=>{ if(lightbox.image){ window.open(lightbox.image,'_blank'); } }}>{I.download({ size: 13 })} Descargar</button>
+                <button className="hbtn primary" onClick={()=>openDownload(lightbox)}>{I.download({ size: 13 })} Descargar</button>
               </div>
             </div>
           </div>
@@ -342,7 +368,21 @@ export default function HistoryScreen({ products, history, onRename, onDelete })
           .lb-modal{grid-template-columns:1fr}
           .lb-stage{min-height:300px;border-right:none;border-bottom:1px solid var(--line)}
         }
+
+        .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:550;transition:all .15s;border:1px solid transparent}
+        .btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink-2)}
+        .btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+        .btn-ghost.danger{color:var(--accent)}
+        .btn-ghost.danger:hover{background:var(--accent-soft);border-color:var(--accent)}
+        .btn:disabled{opacity:.5;cursor:not-allowed}
       `}</style>
+
+      <DownloadModal
+        open={dlOpen}
+        onClose={() => setDlOpen(false)}
+        bodegon={dlBodegon}
+        products={products}
+      />
     </section>
   );
 }

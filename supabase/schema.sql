@@ -51,13 +51,33 @@ CREATE TABLE IF NOT EXISTS bodegones (
   descripcion TEXT,
   productos JSONB NOT NULL,
   imagen_path TEXT,
-  estado TEXT DEFAULT 'generating' CHECK (estado IN ('generating', 'completed', 'failed')),
+  -- Estados:
+  --   generating: en proceso de creación con Gemini
+  --   draft: generación terminada, esperando confirmación del usuario
+  --   completed: usuario pulsó "Guardar en historial"
+  --   failed: error en la generación
+  estado TEXT DEFAULT 'generating' CHECK (estado IN ('generating', 'draft', 'completed', 'failed')),
   prompt_usado TEXT,
   error_mensaje TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
 
   CONSTRAINT bodegon_ref_format CHECK (ref ~ '^[0-9]{2}[A-Z]{2}[0-9]{3}$')
 );
+
+-- Si la tabla ya existe con un constraint sin 'draft', actualízalo.
+DO $$
+DECLARE c text;
+BEGIN
+  SELECT con.conname INTO c
+  FROM pg_constraint con
+  JOIN pg_class rel ON rel.oid = con.conrelid
+  WHERE rel.relname = 'bodegones' AND con.contype = 'c'
+    AND pg_get_constraintdef(con.oid) ILIKE '%estado%' AND pg_get_constraintdef(con.oid) NOT ILIKE '%draft%';
+  IF c IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE bodegones DROP CONSTRAINT ' || quote_ident(c);
+    EXECUTE 'ALTER TABLE bodegones ADD CONSTRAINT bodegones_estado_check CHECK (estado IN (''generating'', ''draft'', ''completed'', ''failed''))';
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_bodegones_created ON bodegones(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bodegones_estado ON bodegones(estado);

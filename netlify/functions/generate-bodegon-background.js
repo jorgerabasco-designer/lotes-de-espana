@@ -22,6 +22,21 @@ const MODEL_FALLBACKS = [
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
 The result must look like a clean, polished product hero shot for an online catalog or product listing page — NOT a lifestyle photo, NOT a flat lay, NOT a holiday/Christmas decorative scene.
 
+================================================================
+ABSOLUTE PRIORITY — PACKAGING FIDELITY (NON-NEGOTIABLE)
+================================================================
+The products in the attached reference images MUST appear in the
+output IDENTICAL to the references — pixel-perfect, label-accurate.
+
+You are ONLY allowed to change: position, orientation, lighting.
+You are STRICTLY FORBIDDEN to change: any logo, brand name, text,
+typography, illustration, colour, shape, cap, lid, ribbon or finish.
+
+If you cannot reproduce a label perfectly, copy it from the
+reference image as a flat texture. NEVER hallucinate, simplify or
+invent packaging design. The viewer MUST be able to read every
+brand name and every line of label text exactly as in the reference.
+
 PRODUCTS TO INCLUDE
 Use the attached reference images EXACTLY as shown. Do NOT redesign, recolor, retypeset or rewrite any label, logo, brand name or text on the packaging. Preserve every typography, color, illustration and detail of the original packaging with photographic, label-accurate fidelity. The viewer must be able to clearly read all brand names.
 
@@ -309,10 +324,10 @@ export const handler = async (event) => {
     return json(500, { error: 'Error guardando imagen: ' + upErr.message });
   }
 
-  // 8) Marcar como completado
+  // 8) Marcar como 'draft' (generación lista, esperando que el usuario pulse "Guardar en historial")
   await supabase
     .from('bodegones')
-    .update({ estado: 'completed', imagen_path: path })
+    .update({ estado: 'draft', imagen_path: path })
     .eq('ref', ref);
 
   // En background functions Netlify NO entrega esta respuesta al cliente — el

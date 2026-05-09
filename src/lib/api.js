@@ -151,12 +151,58 @@ function rowToBodegon(row) {
 
 export async function listBodegones() {
   if (!SUPABASE_READY) return [];
+  // Solo bodegones que el usuario haya guardado al historial (estado 'completed').
   const { data, error } = await supabase
     .from('bodegones')
     .select('*')
+    .eq('estado', 'completed')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(rowToBodegon);
+}
+
+// Promueve un bodegón en estado 'draft' a 'completed' (lo añade al historial)
+export async function commitBodegon(ref, patch = {}) {
+  if (!SUPABASE_READY) return null;
+  const { data, error } = await supabase
+    .from('bodegones')
+    .update({ ...patch, estado: 'completed' })
+    .eq('ref', ref)
+    .select()
+    .single();
+  if (error) throw error;
+  return rowToBodegon(data);
+}
+
+// Borra un bodegón y, si tiene imagen, su fichero en Storage.
+export async function discardBodegon(ref) {
+  if (!SUPABASE_READY) return true;
+  const { data: row } = await supabase
+    .from('bodegones')
+    .select('imagen_path')
+    .eq('ref', ref)
+    .maybeSingle();
+  if (row?.imagen_path) {
+    await supabase.storage.from('bodegones').remove([row.imagen_path]).catch(() => {});
+  }
+  await supabase.from('bodegones').delete().eq('ref', ref);
+  return true;
+}
+
+// Vacía completamente la tabla de bodegones (con sus imágenes).
+export async function clearAllBodegones() {
+  if (!SUPABASE_READY) return 0;
+  const { data: rows } = await supabase.from('bodegones').select('ref, imagen_path');
+  const paths = (rows || []).map(r => r.imagen_path).filter(Boolean);
+  if (paths.length) {
+    await supabase.storage.from('bodegones').remove(paths).catch(() => {});
+  }
+  const { error } = await supabase
+    .from('bodegones')
+    .delete()
+    .not('ref', 'is', null);
+  if (error) throw error;
+  return rows?.length || 0;
 }
 
 export async function updateBodegon(id, patch) {
@@ -331,7 +377,9 @@ export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 5 * 60 *
     if (!data) throw new Error('Bodegón no encontrado.');
 
     onTick && onTick(data);
-    if (data.estado === 'completed') return rowToBodegon(data);
+    // 'draft' = generación lista pero aún no guardada en historial.
+    // 'completed' = ya guardada (no debería llegar aquí, pero la trataríamos igual).
+    if (data.estado === 'draft' || data.estado === 'completed') return rowToBodegon(data);
     if (data.estado === 'failed') throw new Error(data.error_mensaje || 'La generación falló.');
 
     await new Promise(r => setTimeout(r, intervalMs));

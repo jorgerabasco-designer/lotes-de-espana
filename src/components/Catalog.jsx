@@ -200,18 +200,16 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
         <div className="pmeta">
           <div className="pmeta-l">
             <span className="psku">{p.sku}</span>
-            <span className="psep">·</span>
-            <span className="pdim">{p.h}×{p.w}×{p.d} cm</span>
           </div>
-          {(p.tags || []).length > 0 && (
-            <div className="ptag-row">
-              {(p.tags || []).slice(0, 2).map(t => {
-                const lbl = tagLabels[t] || t;
-                return <span key={t} className="ptag">{lbl}</span>;
-              })}
-            </div>
-          )}
         </div>
+        {(p.tags || []).length > 0 && (
+          <div className="ptag-row">
+            {(p.tags || []).slice(0, 3).map(t => {
+              const lbl = tagLabels[t] || t;
+              return <span key={t} className="ptag">{lbl}</span>;
+            })}
+          </div>
+        )}
       </div>
       <style>{`
         .pcard{position:relative;background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;cursor:pointer;transition:all .2s cubic-bezier(.2,.8,.2,1);overflow:hidden;text-align:left;width:100%;display:block;-webkit-tap-highlight-color:transparent}
@@ -251,7 +249,7 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
         .pname{font-size:14.5px;font-weight:600;color:var(--ink);line-height:1.3;letter-spacing:-.005em;font-family:'Fraunces',serif}
         .pmeta{font-size:11.5px;color:var(--muted);margin-top:5px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
         .pmeta-l{display:flex;align-items:center;gap:6px;min-width:0}
-        .ptag-row{display:flex;gap:4px;flex-shrink:0}
+        .ptag-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
         .ptag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);font-weight:600;background:var(--bg);border:1px solid var(--line);padding:3px 7px;border-radius:99px}
         .pcard.sel .ptag{background:#fff;border-color:var(--accent-soft);color:var(--accent)}
         .psku{letter-spacing:.4px;font-weight:500}
@@ -263,14 +261,36 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
 }
 
 function UploadCard({ onClick }) {
+  const [dragOver, setDragOver] = React.useState(false);
+  const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); };
+  const onDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); };
+  const onDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      onClick(file);
+    } else if (file) {
+      alert('El archivo tiene que ser una imagen.');
+    }
+  };
   return (
-    <button className="upcard" onClick={onClick}>
+    <button
+      className={`upcard ${dragOver ? 'over' : ''}`}
+      onClick={() => onClick()}
+      onDragOver={onDragOver}
+      onDragEnter={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div className="upcard-icon">{I.plus({ size: 24 })}</div>
       <div className="upcard-text">Subir producto</div>
       <div className="upcard-sub">Arrastra una imagen o haz clic</div>
       <style>{`
         .upcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1.5px dashed var(--line);border-radius:18px;background:transparent;color:var(--muted);min-height:340px;padding:14px;transition:all .15s}
         .upcard:hover{border-color:var(--accent);color:var(--accent);background:rgba(167,77,74,.02)}
+        .upcard.over{border-color:var(--accent);background:var(--accent-soft);border-style:solid;color:var(--accent)}
         .upcard-icon{width:46px;height:46px;border-radius:50%;background:#fff;border:1px solid var(--line);display:grid;place-items:center;margin-bottom:6px}
         .upcard-text{font-size:13.5px;font-weight:600;color:var(--ink)}
         .upcard-sub{font-size:11.5px}

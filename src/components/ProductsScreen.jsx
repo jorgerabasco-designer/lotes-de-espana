@@ -7,7 +7,7 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
   const [q, setQ] = useState('');
   const [confirmDel, setConfirmDel] = useState(null);
 
-  const { categories, catLabels } = useTaxonomy();
+  const { categories, catLabels, tagLabels } = useTaxonomy();
   const cats = [{ id: 'all', label: 'Todos' }, ...categories.map(c => ({ id: c.id, label: c.label }))];
   const filtered = products.filter(p => {
     if (cat !== 'all' && p.cat !== cat) return false;
@@ -44,6 +44,7 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
           <div className="pc-name">Producto</div>
           <div className="pc-sku">Referencia</div>
           <div className="pc-cat">Categoría</div>
+          <div className="pc-tags">Etiquetas</div>
           <div className="pc-dim">Dimensiones</div>
           <div className="pc-act"></div>
         </div>
@@ -58,6 +59,12 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
             </div>
             <div className="pc-sku mono">{p.sku}</div>
             <div className="pc-cat"><span className="cat-tag">{catLabels[p.cat] || p.cat}</span></div>
+            <div className="pc-tags">
+              {(p.tags || []).slice(0, 3).map(t => (
+                <span key={t} className="row-tag">{tagLabels[t] || t}</span>
+              ))}
+              {(p.tags || []).length > 3 && <span className="row-tag more">+{p.tags.length - 3}</span>}
+            </div>
             <div className="pc-dim mono">{p.h}×{p.w}×{p.d} cm</div>
             <div className="pc-act">
               <button className="iconbtn-l danger" onClick={(e) => { e.stopPropagation(); setConfirmDel(p); }} title="Eliminar">{I.trash({ size: 15 })}</button>
@@ -106,10 +113,17 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
         .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 
         .ptable{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
-        .prow{display:grid;grid-template-columns:72px 1.5fr .9fr .9fr .9fr 80px;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);transition:background .12s}
+        .prow{display:grid;grid-template-columns:72px 1.5fr .9fr .9fr 1.2fr .9fr 80px;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);transition:background .12s}
         .prow:last-child{border-bottom:none}
         .prow:not(.phead):hover{background:#FAFAF7}
         .phead{background:#FAFAF7;padding:10px 16px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line)}
+        .pc-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+        .row-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);font-weight:600;background:var(--bg);border:1px solid var(--line);padding:3px 7px;border-radius:99px;white-space:nowrap}
+        .row-tag.more{background:transparent;color:var(--muted)}
+        @media (max-width: 1100px){
+          .prow{grid-template-columns:60px 1.4fr .9fr .9fr .9fr 80px}
+          .pc-tags{display:none}
+        }
         .pc-thumb{width:52px;height:52px;border-radius:10px;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px}
         .pc-thumb img{width:100%;height:100%;object-fit:contain;object-position:center}
         .prow-clickable{cursor:pointer}

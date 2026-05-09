@@ -54,7 +54,7 @@ export default function Sidebar({
 
           {allTags.length > 0 && (
             <>
-              <div className="filter-label">Tags</div>
+              <div className="filter-label">Etiquetas</div>
               <div className="pill-row">
                 {allTags.map(t => (
                   <button key={t.id} className={`spill stag ${tags.includes(t.id) ? 'on' : ''}`} onClick={() => toggleTag(t.id)}>{t.label}</button>
@@ -108,7 +108,7 @@ export default function Sidebar({
         .nav-icon{color:var(--muted);display:grid;place-items:center}
 
         .filters{margin-top:18px;padding-top:18px;border-top:1px solid var(--line);flex:1;display:flex;flex-direction:column;gap:8px;overflow-y:auto}
-        .filter-label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:0 4px;margin-top:6px}
+        .filter-label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:0 4px;margin-top:24px}
         .filter-label:first-child{margin-top:0}
         .pill-row{display:flex;flex-wrap:wrap;gap:5px;padding:0 2px}
         .spill{padding:5px 11px;border-radius:99px;font-size:12px;color:var(--ink-2);background:transparent;border:1px solid var(--line);font-weight:500;transition:all .12s;letter-spacing:-.005em}

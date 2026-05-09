@@ -83,7 +83,7 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
 
   const sections = [
     { id: 'prompt',   label: 'Prompt de generación', desc: 'Plantilla base IA (Gemini)' },
-    { id: 'taxonomy', label: 'Categorías y tags',    desc: 'Organización del catálogo' },
+    { id: 'taxonomy', label: 'Categorías y etiquetas', desc: 'Organización del catálogo' },
     { id: 'about',    label: 'Acerca de',            desc: 'Lotes de España · Studio' },
   ];
 
@@ -189,67 +189,10 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
               <ul className="about-list">
                 <li><strong>Frontend:</strong> React 18 + Vite</li>
                 <li><strong>Base de datos:</strong> Supabase (Postgres + Storage)</li>
-                <li><strong>Generación IA:</strong> Google Gemini 2.5 Image Preview (vía Netlify Function)</li>
+                <li><strong>Generación IA:</strong> Google Gemini 3 Pro (vía Netlify Background Function)</li>
                 <li><strong>Hosting:</strong> Netlify</li>
                 <li><strong>Repositorio:</strong> GitHub (auto-deploy en cada commit)</li>
               </ul>
-
-              <div className="seed-block">
-                <div className="seed-h">
-                  <div>
-                    <div className="seed-t">Diagnóstico de Supabase</div>
-                    <div className="seed-s">
-                      Comprueba que las tablas y los buckets existen y que la app puede subir imágenes.
-                    </div>
-                  </div>
-                </div>
-                <button className="btn btn-ghost" onClick={handleDiagnose} disabled={!SUPABASE_READY || diagBusy}>
-                  {I.refresh({ size: 14 })} {diagBusy ? 'Comprobando…' : 'Ejecutar diagnóstico'}
-                </button>
-                {diagReport && (
-                  <div className="diag-result">
-                    <div><strong>Cliente Supabase:</strong> {diagReport.supabaseReady ? '✓ inicializado' : '❌ sin claves'}</div>
-                    <div><strong>Tabla products:</strong> {diagReport.productsTable}</div>
-                    <div><strong>Tabla bodegones:</strong> {diagReport.bodegonesTable}</div>
-                    <div><strong>Tabla settings:</strong> {diagReport.settingsTable}</div>
-                    <div><strong>Bucket productos:</strong> {diagReport.bucketProductos}</div>
-                    <div><strong>Bucket bodegones:</strong> {diagReport.bucketBodegones}</div>
-                    <div><strong>Subida de prueba:</strong> {diagReport.canUploadTest}</div>
-                    {(String(diagReport.bucketProductos).includes('❌') || String(diagReport.canUploadTest).includes('❌')) && (
-                      <div className="diag-fix">
-                        ⚠️ Algo falla en Storage. Ve a Supabase → SQL Editor → ejecuta de nuevo el archivo <code>supabase/schema.sql</code> entero (es seguro re-ejecutarlo).
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="seed-block">
-                <div className="seed-h">
-                  <div>
-                    <div className="seed-t">Importar productos de demostración</div>
-                    <div className="seed-s">
-                      Sube de un golpe los {SEED_PRODUCTS.length} productos de muestra (vino, AOVE, turrones, conservas, snacks…) con sus fotos a tu Supabase. Útil para probar la app sin tener que rellenar el catálogo desde cero.
-                    </div>
-                  </div>
-                </div>
-                {!SUPABASE_READY && (
-                  <div className="seed-warn">
-                    Supabase no está conectado en esta página. Configura las variables <code>VITE_SUPABASE_URL</code> y <code>VITE_SUPABASE_ANON_KEY</code> primero.
-                  </div>
-                )}
-                {seedProgress && seedBusy && (
-                  <div className="seed-progress">
-                    Subiendo {seedProgress.current}… ({seedProgress.done}/{seedProgress.total})
-                  </div>
-                )}
-                {seedDone && (
-                  <div className="seed-done">{I.check({ size: 14 })} Importación completada — {SEED_PRODUCTS.length} productos disponibles en el catálogo.</div>
-                )}
-                <button className="btn btn-primary" onClick={handleImportSeed} disabled={!SUPABASE_READY || seedBusy}>
-                  {I.upload({ size: 14 })} {seedBusy ? 'Importando…' : 'Importar productos demo'}
-                </button>
-              </div>
             </div>
           )}
         </div>

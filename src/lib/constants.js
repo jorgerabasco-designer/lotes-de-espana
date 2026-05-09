@@ -32,6 +32,34 @@ export const TAG_LABELS = Object.fromEntries(DEFAULT_TAGS.map(t => [t.id, t.labe
 export const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
 The result must look like a clean, polished product hero shot for an online catalog or product listing page — NOT a lifestyle photo, NOT a flat lay, NOT a holiday/Christmas decorative scene.
 
+================================================================
+ABSOLUTE PRIORITY — PACKAGING FIDELITY (NON-NEGOTIABLE)
+================================================================
+This is the SINGLE most important rule of the entire prompt:
+the products in the attached reference images MUST appear in the
+output IDENTICAL to the references — pixel-perfect, label-accurate.
+
+You are ONLY allowed to change:
+  - the product's POSITION in the composition
+  - the product's ORIENTATION (rotation around its vertical axis,
+    only as much as needed to match the assigned tier rules)
+  - the LIGHTING and SHADOWS that affect the product
+
+You are STRICTLY FORBIDDEN to change:
+  - any logo, brand name, sub-brand, slogan or text on the label
+  - the typography (font, size, weight, kerning) of any text
+  - any illustration, photograph or graphic on the packaging
+  - the colour palette of the packaging
+  - the proportions, shape or material of the bottle / box / jar / tin
+  - the cap, lid, capsule, ribbon, sticker or seal
+  - the paper finish, embossing or print effects
+
+If you cannot reproduce a label perfectly, copy it from the reference
+image as a flat texture rather than re-drawing it. NEVER hallucinate
+or simplify packaging design. NEVER invent variants or "similar"
+products. The viewer of the final image MUST be able to read every
+brand name and every line of label text exactly as in the reference.
+
 PRODUCTS TO INCLUDE
 Use the attached reference images EXACTLY as shown. Do NOT redesign, recolor, retypeset or rewrite any label, logo, brand name or text on the packaging. Preserve every typography, color, illustration and detail of the original packaging with photographic, label-accurate fidelity. The viewer must be able to clearly read all brand names.
 
