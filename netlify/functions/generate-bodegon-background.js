@@ -124,8 +124,6 @@ function buildProductsBlock(products) {
     lines.push(`  Brand: ${p.marca || '(unknown)'}`);
     lines.push(`  Name: ${p.nombre}`);
     if (p.categoria_id || p.categoria) lines.push(`  Category: ${p.categoria_id || p.categoria}`);
-    if (p.tipo_envase) lines.push(`  Packaging type: ${p.tipo_envase}`);
-    if (p.color_dominante) lines.push(`  Dominant colours: ${p.color_dominante}`);
     if (p.descripcion_visual) lines.push(`  Visual description: ${p.descripcion_visual}`);
     if (Array.isArray(p.tags) && p.tags.length) lines.push(`  Attributes: ${p.tags.join(', ')}`);
     lines.push(`  Real physical size: ${p.alto} × ${p.ancho} × ${p.fondo} cm`);

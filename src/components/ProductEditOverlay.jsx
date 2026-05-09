@@ -3,7 +3,7 @@ import { I } from './icons.jsx';
 import { uploadProductPhoto } from '../lib/api.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
 
-const EMPTY_PRODUCT = { sku: '', name: '', brand: '', cat: 'vinos', h: '', w: '', d: '', img: '', tags: [], desc: '', tipo_envase: '', color: '', posicion: '', descripcion_visual: '', notas: '' };
+const EMPTY_PRODUCT = { sku: '', name: '', brand: '', cat: 'vinos', h: '', w: '', d: '', img: '', tags: [], desc: '', posicion: '', descripcion_visual: '', notas: '' };
 
 export default function ProductEditOverlay({ open, product, initialFile, onClose, onSave }) {
   const isNew = !product?.sku;
@@ -171,11 +171,6 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
               <Field label="Altura (cm)" v={form.h} onChange={v => upd('h', v)} mono num/>
               <Field label="Anchura (cm)" v={form.w} onChange={v => upd('w', v)} mono num/>
               <Field label="Profundidad (cm)" v={form.d} onChange={v => upd('d', v)} mono num/>
-            </div>
-
-            <div className="frow">
-              <Field label="Tipo de envase" v={form.tipo_envase} onChange={v => upd('tipo_envase', v)} placeholder="botella vidrio oscuro"/>
-              <Field label="Color dominante" v={form.color} onChange={v => upd('color', v)} placeholder="black and white"/>
             </div>
 
             <div className="frow">
