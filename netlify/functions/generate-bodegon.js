@@ -10,13 +10,13 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Lista de modelos a probar en orden. Si la env var GEMINI_IMAGE_MODEL está definida, va primero.
-// Orden actualizado a los modelos vigentes en 2026 (Gemini 3 + 2.5).
+// Orden actualizado: PRO primero (máxima calidad), luego Flash. gemini-2.5-flash-image-preview
+// ya no existe (Google lo deprecó) — no lo incluimos.
 const MODEL_FALLBACKS = [
   process.env.GEMINI_IMAGE_MODEL,
-  'gemini-3.1-flash-image-preview',
-  'gemini-3-pro-image-preview',
-  'gemini-2.5-flash-image',
-  'gemini-2.5-flash-image-preview',
+  'gemini-3-pro-image-preview',     // Máxima calidad fotorealista
+  'gemini-3.1-flash-image-preview', // Más rápido, balance calidad/coste
+  'gemini-2.5-flash-image',         // Estable, fallback
 ].filter(Boolean);
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
@@ -190,12 +190,10 @@ export const handler = async (event) => {
   const parts = [{ text: prompt }];
   for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
 
-  // Cada modelo se prueba con varias configs (algunos modelos rechazan responseModalities)
+  // Variantes simplificadas: la API v1 no acepta responseModalities, así que solo v1beta.
   const REQUEST_VARIANTS = [
     { name: 'v1beta + responseModalities[IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
     { name: 'v1beta + responseModalities[TEXT,IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
-    { name: 'v1beta sin generationConfig', apiVersion: 'v1beta', body: { contents: [{ parts }] } },
-    { name: 'v1 + responseModalities[IMAGE]', apiVersion: 'v1', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
   ];
 
   let imageBase64 = null;
@@ -257,13 +255,29 @@ export const handler = async (event) => {
       }
     } catch {}
 
-    // Construir mensaje detallado: qué modelo + variante + error en cada intento
-    const detail = allErrors.map(e => `• ${e.model} [${e.variant}]: ${e.error}`).join('\n');
-    let msg = `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle de cada intento:\n${detail}`;
-    if (availableImageModels.length) {
-      msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
+    // Detectar el caso más común: cuota agotada (limit: 0 = no hay billing)
+    const quotaIssue = allErrors.some(e =>
+      /quota|exceed/i.test(e.error || '') && /limit:\s*0/i.test(e.error || '')
+    );
+
+    let msg;
+    if (quotaIssue) {
+      msg =
+        'Tu API key de Google no tiene cuota para generar imágenes (limit: 0).\n\n' +
+        'Los modelos de imagen de Gemini NO están en el tier gratuito. Tienes que activar facturación:\n\n' +
+        '1. Ve a https://aistudio.google.com/app/apikey\n' +
+        '2. Click en tu proyecto → "Set up Billing" (o ve a https://console.cloud.google.com/billing).\n' +
+        '3. Vincula una tarjeta y un proyecto Cloud.\n' +
+        '4. Activa la "Generative Language API" en ese proyecto.\n' +
+        '5. Vuelve aquí y prueba.\n\n' +
+        'Coste aproximado: ~$0.04/imagen con Gemini 3 Pro · ~$0.01/imagen con Flash. ' +
+        'Para 100 bodegones al mes con Pro = ~$4 USD.';
     } else {
-      msg += `\n\nTu API key no tiene NINGÚN modelo de imagen disponible. Crea una nueva en aistudio.google.com con un proyecto que tenga acceso a Imagen / Gemini Image.`;
+      const detail = allErrors.map(e => `• ${e.model} [${e.variant}]: ${e.error}`).join('\n');
+      msg = `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle:\n${detail}`;
+      if (availableImageModels.length) {
+        msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
+      }
     }
 
     console.error('[Gemini] FAILED — todos los modelos:', allErrors);
