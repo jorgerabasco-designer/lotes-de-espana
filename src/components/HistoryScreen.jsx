@@ -53,6 +53,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
   const [dlOpen, setDlOpen] = useState(false);
   const [dlBodegon, setDlBodegon] = useState(null);
   const [clearing, setClearing] = useState(false);
+  const [zoomedSrc, setZoomedSrc] = useState(null);
 
   const handleClearAll = async () => {
     if (!confirm('Esto eliminará TODOS los bodegones del historial (también sus imágenes). Esta acción no se puede deshacer. ¿Continuar?')) return;
@@ -241,7 +242,17 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
             <button className="lb-close" onClick={() => setLightbox(null)}>{I.close({ size: 18 })}</button>
             <div className="lb-stage">
               {lightbox.image
-                ? <img className="lb-stage-img" src={lightbox.image} alt={lightbox.title}/>
+                ? (
+                  <button
+                    type="button"
+                    className="lb-stage-zoom"
+                    onClick={() => setZoomedSrc(lightbox.image)}
+                    title="Ver a pantalla completa"
+                  >
+                    <img className="lb-stage-img" src={lightbox.image} alt={lightbox.title}/>
+                    <span className="lb-zoom-hint">{I.expand({ size: 14 })} Ampliar</span>
+                  </button>
+                )
                 : <Composition skus={lightbox.skus} big/>}
             </div>
             <div className="lb-side">
@@ -346,7 +357,11 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         .lb-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.85);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);transition:all .15s;z-index:5}
         .lb-close:hover{background:#fff;transform:scale(1.05)}
         .lb-stage{background:#fff;display:flex;align-items:center;justify-content:center;padding:30px;min-height:520px;border-right:1px solid var(--line);position:relative;overflow:hidden}
-        .lb-stage-img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block}
+        .lb-stage-zoom{position:relative;display:flex;align-items:center;justify-content:center;background:transparent;border:none;padding:0;cursor:zoom-in;width:100%;height:100%;border-radius:8px;overflow:hidden}
+        .lb-stage-img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
+        .lb-stage-zoom:hover .lb-stage-img{transform:scale(1.015)}
+        .lb-zoom-hint{position:absolute;bottom:14px;right:14px;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;background:rgba(20,16,12,.75);backdrop-filter:blur(6px);color:#fff;font-size:11px;font-weight:600;letter-spacing:.04em;border-radius:99px;opacity:0;transition:opacity .2s;pointer-events:none}
+        .lb-stage-zoom:hover .lb-zoom-hint{opacity:1}
         .lb-stage .hthumb-comp{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding:48px 48px 60px}
         .lb-stage .hthumb-comp img{position:relative;max-width:24%;height:auto}
         .lb-side{padding:36px 30px 24px;display:flex;flex-direction:column;background:var(--paper);overflow-y:auto}
@@ -383,6 +398,33 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         bodegon={dlBodegon}
         products={products}
       />
+
+      {zoomedSrc && (
+        <div
+          className="hist-zoom-bg"
+          onClick={(e) => { e.stopPropagation(); setZoomedSrc(null); }}
+        >
+          <button
+            className="hist-zoom-close"
+            onClick={(e) => { e.stopPropagation(); setZoomedSrc(null); }}
+          >{I.close({ size: 22 })}</button>
+          <img
+            className="hist-zoom-img"
+            src={zoomedSrc}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+          />
+
+          <style>{`
+            .hist-zoom-bg{position:fixed;inset:0;background:rgba(20,16,12,.92);backdrop-filter:blur(12px);z-index:3000;display:flex;align-items:center;justify-content:center;padding:32px;cursor:zoom-out;animation:histZoomFade .3s cubic-bezier(.2,.8,.2,1)}
+            @keyframes histZoomFade{from{opacity:0}to{opacity:1}}
+            .hist-zoom-img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 30px 100px rgba(0,0,0,.6);cursor:default;animation:histZoomIn .35s cubic-bezier(.2,.8,.2,1)}
+            @keyframes histZoomIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+            .hist-zoom-close{position:fixed;top:24px;right:24px;width:46px;height:46px;border-radius:14px;background:rgba(255,255,255,.12);color:#fff;display:grid;place-items:center;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.2);z-index:3001;transition:all .15s;cursor:pointer}
+            .hist-zoom-close:hover{background:rgba(255,255,255,.25);transform:scale(1.06)}
+          `}</style>
+        </div>
+      )}
     </section>
   );
 }

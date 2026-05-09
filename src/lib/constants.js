@@ -87,7 +87,10 @@ BACK TIER (tallest items, ~20–30 cm): wine bottles, oil bottles, spirits, tall
 
 MIDDLE TIER (medium items, ~10–18 cm): vertical boxes of biscuits, chocolates, medium tins. Placed in front of the back tier, OVERLAPPING the bottles at their base by 20–30% of the bottle's width (real physical overlap, not just proximity). They partially hide the lower portion of the back-tier products.
 
-FRONT TIER (smallest / flat items, < 10 cm): small jars, flat tins, flat turrón boxes. Lying flat or slightly tilted toward the camera (10–15° tilt) so the top label is readable. Forming a horizontal row across the front, overlapping the middle tier at their base.
+FRONT TIER (smallest / flat items, < 10 cm): small jars, flat tins, flat turrón boxes. Lying PERFECTLY FLAT on the surface (NOT tilted) so their top label is readable from above, OR standing upright on their long edge. Forming a horizontal row across the front, overlapping the middle tier at their base.
+
+PRODUCT ORIENTATION — strict
+Every product must be either (a) standing perfectly upright with its main label facing the camera straight on, or (b) lying perfectly flat on the surface with its top label facing straight up. NO product should be tilted, leaning, rotated diagonally, or shown at an oblique angle. Aligned with the photographic conventions of premium catalog shots — clean, parallel lines, no theatrical angles.
 
 GLOBAL DENSITY: products MUST be very close, with real physical overlap at the bases. No empty gaps between products. No floating products. Tight, abundant, "full hamper" feel. Slight asymmetry within balance: not a perfectly symmetric mirror. All products fully visible — viewer can identify each brand. Products fill ~80–85% of the frame width, centered horizontally on the lower-middle of the frame.
 

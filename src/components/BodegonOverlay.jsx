@@ -111,7 +111,7 @@ export default function BodegonOverlay({
             {generating && (
               <div className="bo-loading">
                 <div className="bo-loading-orb"/>
-                <div className="bo-loading-text">Generando con Gemini IA…</div>
+                <div className="bo-loading-text">Generando con IA…</div>
                 <div className="bo-loading-sub">
                   {elapsed < 8 && 'Construyendo el prompt y enviando referencias'}
                   {elapsed >= 8 && elapsed < 25 && 'Componiendo la pirámide TRASERA → MEDIA → DELANTERA'}

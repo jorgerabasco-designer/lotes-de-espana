@@ -48,23 +48,73 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
-      const margin = 16;
+      const margin = 18;
 
-      // Cabecera
+      // ---- Paleta ----
+      const ink = [45, 42, 38];
+      const ink2 = [91, 85, 76];
+      const muted = [139, 131, 117];
+      const accent = [167, 77, 74];
+      const olive = [47, 74, 61];
+      const line = [230, 222, 210];
+
+      // ---- Cabecera con logo + marca ----
+      // Banda superior crudo claro
+      doc.setFillColor(245, 241, 232);
+      doc.rect(0, 0, pageW, 32, 'F');
+
+      // Logo (si carga)
+      try {
+        const logoRes = await fetch('/seed/logo.png', { mode: 'cors' });
+        if (logoRes.ok) {
+          const lblob = await logoRes.blob();
+          const ldata = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = reject;
+            r.readAsDataURL(lblob);
+          });
+          doc.addImage(ldata, 'PNG', margin, 9, 14, 14, undefined, 'FAST');
+        }
+      } catch {}
+
+      // Texto cabecera
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.setTextColor(45, 42, 38);
-      doc.text(bodegon.title || 'Bodegón', margin, margin + 6);
-
+      doc.setFontSize(13);
+      doc.setTextColor(...ink);
+      doc.text('LOTES DE ESPAÑA', margin + 18, 16);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.setTextColor(139, 131, 117);
+      doc.setFontSize(8);
+      doc.setTextColor(...muted);
+      doc.text('Studio · Composición personalizada', margin + 18, 21);
+
+      // Fecha alineada a la derecha en la banda
       const dateStr = bodegon.created_at
         ? new Date(bodegon.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })
         : new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
-      doc.text(`${(bodegon.skus || []).length} productos · ${dateStr}`, margin, margin + 11);
+      doc.setFontSize(8);
+      doc.setTextColor(...muted);
+      doc.text(dateStr.toUpperCase(), pageW - margin, 16, { align: 'right' });
+      doc.setFontSize(9);
+      doc.setTextColor(...ink2);
+      doc.text(`${(bodegon.skus || []).length} productos`, pageW - margin, 21, { align: 'right' });
 
-      // Imagen del bodegón (centrada, ratio mantenido)
+      // Línea separadora bajo cabecera
+      doc.setDrawColor(...line);
+      doc.setLineWidth(0.3);
+      doc.line(margin, 32, pageW - margin, 32);
+
+      // ---- Título del bodegón (Fraunces-style con Times) ----
+      let cursorY = 48;
+      doc.setFont('times', 'normal');
+      doc.setFontSize(28);
+      doc.setTextColor(...ink);
+      const title = bodegon.title || 'Bodegón';
+      const titleLines = doc.splitTextToSize(title, pageW - margin * 2);
+      doc.text(titleLines, margin, cursorY);
+      cursorY += titleLines.length * 9;
+
+      // ---- Imagen del bodegón ----
       const res = await fetch(bodegon.image, { mode: 'cors' });
       const blob = await res.blob();
       const dataUrl = await new Promise((resolve, reject) => {
@@ -76,7 +126,7 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
       const bitmap = await createImageBitmap(blob);
       const imgRatio = bitmap.width / bitmap.height;
       const maxImgW = pageW - margin * 2;
-      const maxImgH = 130;
+      const maxImgH = 110;
       let imgW = maxImgW;
       let imgH = imgW / imgRatio;
       if (imgH > maxImgH) {
@@ -84,62 +134,85 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
         imgW = imgH * imgRatio;
       }
       const imgX = (pageW - imgW) / 2;
-      const imgY = margin + 18;
-      doc.addImage(dataUrl, 'JPEG', imgX, imgY, imgW, imgH, undefined, 'FAST');
-
-      let cursorY = imgY + imgH + 10;
-
-      // Descripción
-      if (bodegon.description) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(45, 42, 38);
-        doc.text('Descripción', margin, cursorY);
-        cursorY += 5;
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(91, 85, 76);
-        const descLines = doc.splitTextToSize(bodegon.description, pageW - margin * 2);
-        doc.text(descLines, margin, cursorY);
-        cursorY += descLines.length * 5 + 4;
-      }
-
-      // Productos
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(45, 42, 38);
-      doc.text(`Productos incluidos (${(bodegon.skus || []).length})`, margin, cursorY);
       cursorY += 6;
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9.5);
-      doc.setTextColor(45, 42, 38);
+      // Sombra suave alrededor de la imagen (3 capas con poca opacidad)
+      // (jsPDF no soporta sombras directamente, simulamos con un rect tras la imagen)
+      doc.setFillColor(...line);
+      doc.roundedRect(imgX - 1, cursorY - 1, imgW + 2, imgH + 2, 2, 2, 'F');
+      doc.addImage(dataUrl, 'JPEG', imgX, cursorY, imgW, imgH, undefined, 'FAST');
+      cursorY += imgH + 14;
+
+      // ---- Descripción ----
+      if (bodegon.description) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(...muted);
+        doc.text('DESCRIPCIÓN', margin, cursorY);
+        cursorY += 6;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10.5);
+        doc.setTextColor(...ink2);
+        const descLines = doc.splitTextToSize(bodegon.description, pageW - margin * 2);
+        doc.text(descLines, margin, cursorY);
+        cursorY += descLines.length * 5.2 + 8;
+      }
+
+      // ---- Productos ----
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(...muted);
+      doc.text(`PRODUCTOS INCLUIDOS · ${(bodegon.skus || []).length}`, margin, cursorY);
+      cursorY += 7;
+
       const skuList = bodegon.skus || [];
+      doc.setLineWidth(0.2);
+      doc.setDrawColor(...line);
+
       for (const sku of skuList) {
         const p = (products || []).find(x => x.sku === sku);
-        if (cursorY > pageH - margin) {
+        if (cursorY > pageH - 30) {
           doc.addPage();
           cursorY = margin;
         }
         if (p) {
+          // Fila con bullet, nombre y referencia a la derecha
+          doc.setFillColor(...olive);
+          doc.circle(margin + 1.5, cursorY - 1.5, 0.9, 'F');
           doc.setFont('helvetica', 'bold');
-          doc.text(`• ${p.name}`, margin, cursorY);
+          doc.setFontSize(11);
+          doc.setTextColor(...ink);
+          doc.text(p.name, margin + 6, cursorY);
           doc.setFont('helvetica', 'normal');
-          doc.setTextColor(139, 131, 117);
-          doc.text(`  ${p.brand} · ref. ${p.sku}`, margin, cursorY + 4);
-          doc.setTextColor(45, 42, 38);
-          cursorY += 9;
+          doc.setFontSize(9);
+          doc.setTextColor(...muted);
+          doc.text(p.brand, margin + 6, cursorY + 4.5);
+
+          doc.setFontSize(8);
+          doc.setTextColor(...muted);
+          doc.text(`Ref. ${p.sku}`, pageW - margin, cursorY, { align: 'right' });
+
+          cursorY += 9.5;
+          doc.line(margin + 6, cursorY - 2, pageW - margin, cursorY - 2);
         } else {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(10);
+          doc.setTextColor(...ink2);
           doc.text(`• ${sku}`, margin, cursorY);
           cursorY += 6;
         }
       }
 
-      // Pie
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(8);
-      doc.setTextColor(139, 131, 117);
-      doc.text('Lotes de España · Generado con IA', margin, pageH - 8);
+      // ---- Pie ----
+      const footY = pageH - 12;
+      doc.setDrawColor(...line);
+      doc.setLineWidth(0.3);
+      doc.line(margin, footY - 4, pageW - margin, footY - 4);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(...muted);
+      doc.text('lotesdeespana.es', margin, footY);
+      doc.text(`Página 1`, pageW - margin, footY, { align: 'right' });
 
       doc.save(`${safeName}.pdf`);
       setTimeout(onClose, 400);

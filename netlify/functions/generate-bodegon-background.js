@@ -105,11 +105,11 @@ function placeInstruction(product) {
   const w = Number(product.ancho || 0);
   const h = Number(product.alto || 0);
   const isFlat = h < 10 && (w >= h * 1.3); // cajas planas / latas planas
-  if (zone === 'BACK' || zone === 'TRASERA') return { zoneEng: 'BACK', instr: 'standing upright' };
-  if (zone === 'MIDDLE' || zone === 'MEDIA') return { zoneEng: 'MIDDLE', instr: 'standing upright, overlapping the back-tier products at their base by ~25%' };
+  if (zone === 'BACK' || zone === 'TRASERA') return { zoneEng: 'BACK', instr: 'standing upright, perfectly vertical, no tilt' };
+  if (zone === 'MIDDLE' || zone === 'MEDIA') return { zoneEng: 'MIDDLE', instr: 'standing upright with no tilt, overlapping the back-tier products at their base by ~25%' };
   // FRONT
-  if (isFlat) return { zoneEng: 'FRONT', instr: 'lying flat with a slight 10° tilt toward the camera' };
-  return { zoneEng: 'FRONT', instr: 'standing upright' };
+  if (isFlat) return { zoneEng: 'FRONT', instr: 'lying perfectly flat on the surface (top label facing straight up to the camera lens), zero tilt, zero rotation' };
+  return { zoneEng: 'FRONT', instr: 'standing upright, perfectly vertical, no tilt' };
 }
 
 function buildProductsBlock(products) {
