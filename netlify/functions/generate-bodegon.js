@@ -183,76 +183,90 @@ export const handler = async (event) => {
     prompt_usado: prompt,
   });
 
-  // 6) Llamar a Gemini — probamos varios modelos por si alguno está deprecado
-  let imageBase64 = null;
-  let imageMime = 'image/png';
-  let usedModel = null;
-  let lastError = null;
+  // 6) Llamar a Gemini — probamos cada modelo con varias configs hasta dar con la buena
+  const FN_VERSION = 'v3-2026-05-09';
+  console.log(`[Gemini] generate-bodegon ${FN_VERSION} · modelos a probar:`, MODEL_FALLBACKS);
 
   const parts = [{ text: prompt }];
   for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
 
+  // Cada modelo se prueba con varias configs (algunos modelos rechazan responseModalities)
+  const REQUEST_VARIANTS = [
+    { name: 'v1beta + responseModalities[IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
+    { name: 'v1beta + responseModalities[TEXT,IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
+    { name: 'v1beta sin generationConfig', apiVersion: 'v1beta', body: { contents: [{ parts }] } },
+    { name: 'v1 + responseModalities[IMAGE]', apiVersion: 'v1', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
+  ];
+
+  let imageBase64 = null;
+  let imageMime = 'image/png';
+  let usedModel = null;
+  const allErrors = []; // [{model, variant, error}]
+
+  outer:
   for (const model of MODEL_FALLBACKS) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok) {
-        lastError = j?.error?.message || `HTTP ${r.status}`;
-        console.warn(`[Gemini] Modelo ${model} falló:`, lastError);
-        continue;
-      }
-      const cand = j?.candidates?.[0];
-      const partsOut = cand?.content?.parts || [];
-      for (const part of partsOut) {
-        if (part.inlineData?.data) {
-          imageBase64 = part.inlineData.data;
-          imageMime = part.inlineData.mimeType || 'image/png';
-          usedModel = model;
-          break;
+    for (const variant of REQUEST_VARIANTS) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/${variant.apiVersion}/models/${model}:generateContent?key=${geminiKey}`;
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(variant.body),
+        });
+        const j = await r.json();
+        if (!r.ok) {
+          const err = j?.error?.message || `HTTP ${r.status}`;
+          allErrors.push({ model, variant: variant.name, error: err });
+          console.warn(`[Gemini] ${model} (${variant.name}) →`, err);
+          continue;
         }
+        const cand = j?.candidates?.[0];
+        const partsOut = cand?.content?.parts || [];
+        for (const part of partsOut) {
+          if (part.inlineData?.data) {
+            imageBase64 = part.inlineData.data;
+            imageMime = part.inlineData.mimeType || 'image/png';
+            usedModel = `${model} (${variant.name})`;
+            break;
+          }
+        }
+        if (imageBase64) {
+          console.log(`[Gemini] ✓ Imagen generada con ${usedModel}`);
+          break outer;
+        }
+        allErrors.push({ model, variant: variant.name, error: 'respuesta sin imagen' });
+      } catch (e) {
+        const err = e.message || String(e);
+        allErrors.push({ model, variant: variant.name, error: err });
+        console.warn(`[Gemini] ${model} (${variant.name}) excepción:`, err);
       }
-      if (imageBase64) {
-        console.log(`[Gemini] Imagen generada con ${model}`);
-        break;
-      }
-      lastError = 'el modelo respondió sin imagen.';
-    } catch (e) {
-      lastError = e.message || String(e);
-      console.warn(`[Gemini] Modelo ${model} excepción:`, lastError);
     }
   }
 
   if (!imageBase64) {
-    // Pedir lista de modelos disponibles para ayudar al usuario
-    let modelsHint = '';
+    // Lista los modelos disponibles
+    let availableImageModels = [];
     try {
       const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
       if (listRes.ok) {
         const ld = await listRes.json();
-        const imageModels = (ld.models || [])
+        availableImageModels = (ld.models || [])
           .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
           .map(m => (m.name || '').replace('models/', ''))
           .filter(name => /image|imagen/i.test(name));
-        if (imageModels.length) {
-          modelsHint = `\n\nModelos de imagen disponibles para tu API key: ${imageModels.join(', ')}. ` +
-                       `Configura GEMINI_IMAGE_MODEL en Netlify con uno de esos.`;
-        } else {
-          modelsHint = '\n\nNo hay modelos de imagen disponibles para tu API key. ' +
-                       'Probablemente el proyecto de Google AI Studio no tiene activado el modelo Imagen / Image generation. ' +
-                       'Crea otra API key desde aistudio.google.com con un proyecto que sí lo tenga.';
-        }
       }
     } catch {}
 
-    const msg = `Error generando con Gemini: ${lastError}${modelsHint}`;
+    // Construir mensaje detallado: qué modelo + variante + error en cada intento
+    const detail = allErrors.map(e => `• ${e.model} [${e.variant}]: ${e.error}`).join('\n');
+    let msg = `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle de cada intento:\n${detail}`;
+    if (availableImageModels.length) {
+      msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
+    } else {
+      msg += `\n\nTu API key no tiene NINGÚN modelo de imagen disponible. Crea una nueva en aistudio.google.com con un proyecto que tenga acceso a Imagen / Gemini Image.`;
+    }
+
+    console.error('[Gemini] FAILED — todos los modelos:', allErrors);
     await supabase.from('bodegones').update({ estado: 'failed', error_mensaje: msg }).eq('ref', ref);
     return json(500, { error: msg });
   }
