@@ -124,22 +124,45 @@ export const handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); }
   catch { return json(400, { error: 'JSON inválido' }); }
 
-  const { skus, title, description } = body;
-  if (!Array.isArray(skus) || skus.length === 0) {
-    return json(400, { error: 'Selecciona al menos un producto.' });
-  }
+  // El frontend ya creó la fila en bodegones (estado='generating') y nos pasa la ref.
+  const { ref } = body;
+  if (!ref) return json(400, { error: 'Falta el campo "ref" del bodegón.' });
 
   const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
 
-  // 1) Cargar productos seleccionados
+  // 1) Cargar la fila del bodegón
+  const { data: bod, error: bErr } = await supabase
+    .from('bodegones')
+    .select('*')
+    .eq('ref', ref)
+    .single();
+  if (bErr || !bod) {
+    return json(404, { error: 'Bodegón no encontrado: ' + (bErr?.message || 'sin datos') });
+  }
+  const skus = bod.productos || [];
+  const finalTitle = bod.nombre;
+  const description = bod.descripcion;
+
+  if (!Array.isArray(skus) || skus.length === 0) {
+    await markFailed(supabase, ref, 'Bodegón sin productos.');
+    return json(400, { error: 'Bodegón sin productos.' });
+  }
+
+  // 2) Cargar productos seleccionados
   const { data: rows, error: pErr } = await supabase
     .from('products')
     .select('*')
     .in('ref', skus);
-  if (pErr) return json(500, { error: 'Error consultando productos: ' + pErr.message });
-  if (!rows || rows.length === 0) return json(404, { error: 'No se encontraron productos en la base de datos.' });
+  if (pErr) {
+    await markFailed(supabase, ref, 'Error consultando productos: ' + pErr.message);
+    return json(500, { error: 'Error consultando productos: ' + pErr.message });
+  }
+  if (!rows || rows.length === 0) {
+    await markFailed(supabase, ref, 'No se encontraron productos en la base de datos.');
+    return json(404, { error: 'No se encontraron productos en la base de datos.' });
+  }
 
-  // 2) Cargar plantilla de prompt (configurable desde Settings)
+  // 3) Cargar plantilla de prompt (configurable desde Settings)
   let template = DEFAULT_PROMPT_TEMPLATE;
   try {
     const { data: setting } = await supabase
@@ -150,13 +173,16 @@ export const handler = async (event) => {
     if (setting?.value && typeof setting.value === 'string') template = setting.value;
   } catch {}
 
-  // 3) Construir prompt
+  // 4) Construir prompt
   const productsBlock = buildProductsBlock(rows);
   const prompt = template
     .replace('{PRODUCTS}', productsBlock)
     .replace('{N}', String(rows.length));
 
-  // 4) Descargar imágenes de referencia (vía Storage público)
+  // Guardar el prompt usado (para referencia) y mantener estado 'generating'
+  await supabase.from('bodegones').update({ prompt_usado: prompt }).eq('ref', ref);
+
+  // 5) Descargar imágenes de referencia (vía Storage público)
   const refImages = [];
   for (const r of rows) {
     if (!r.foto_path) continue;
@@ -168,20 +194,6 @@ export const handler = async (event) => {
       console.warn('Sin imagen para', r.ref, e.message);
     }
   }
-
-  // 5) Pre-registrar bodegón en estado "generating"
-  const ref = newBodegonRef();
-  const numero = await nextBodegonNumber(supabase);
-  const finalTitle = title || `Bodegón IA #${numero}`;
-  await supabase.from('bodegones').insert({
-    ref,
-    numero,
-    nombre: finalTitle,
-    descripcion: description || null,
-    productos: skus,
-    estado: 'generating',
-    prompt_usado: prompt,
-  });
 
   // 6) Llamar a Gemini — probamos cada modelo con varias configs hasta dar con la buena
   const FN_VERSION = 'v3-2026-05-09';
@@ -293,24 +305,31 @@ export const handler = async (event) => {
     .from('bodegones')
     .upload(path, buf, { contentType: imageMime, upsert: true });
   if (upErr) {
-    await supabase.from('bodegones').update({ estado: 'failed', error_mensaje: 'Storage: ' + upErr.message }).eq('ref', ref);
+    await markFailed(supabase, ref, 'Storage: ' + upErr.message);
     return json(500, { error: 'Error guardando imagen: ' + upErr.message });
   }
 
-  await supabase.from('bodegones').update({ estado: 'completed', imagen_path: path }).eq('ref', ref);
+  // 8) Marcar como completado
+  await supabase
+    .from('bodegones')
+    .update({ estado: 'completed', imagen_path: path })
+    .eq('ref', ref);
 
-  const { data: pub } = supabase.storage.from('bodegones').getPublicUrl(path);
-
-  return json(200, {
-    id: ref,
-    n: numero,
-    title: finalTitle,
-    description: description || '',
-    skus,
-    image: pub?.publicUrl || null,
-    image_path: path,
-  });
+  // En background functions Netlify NO entrega esta respuesta al cliente — el
+  // frontend hace polling sobre la fila de Supabase. Devolvemos OK por completitud.
+  return json(200, { ok: true, ref, image_path: path });
 };
+
+async function markFailed(supabase, ref, msg) {
+  try {
+    await supabase
+      .from('bodegones')
+      .update({ estado: 'failed', error_mensaje: msg })
+      .eq('ref', ref);
+  } catch (e) {
+    console.error('No se pudo marcar como failed:', e);
+  }
+}
 
 // ---------- Helpers ----------
 function corsHeaders() {
@@ -326,23 +345,4 @@ function json(statusCode, body) {
     headers: { 'Content-Type': 'application/json', ...corsHeaders() },
     body: JSON.stringify(body),
   };
-}
-function newBodegonRef() {
-  // Formato 2 dígitos + 2 letras + 3 dígitos (compatible con la regla de la tabla)
-  const d2 = () => String(Math.floor(Math.random() * 90) + 10);
-  const a2 = () => {
-    const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    return A[Math.floor(Math.random() * 26)] + A[Math.floor(Math.random() * 26)];
-  };
-  const d3 = () => String(Math.floor(Math.random() * 900) + 100);
-  return `${d2()}${a2()}${d3()}`;
-}
-async function nextBodegonNumber(supabase) {
-  const { data } = await supabase
-    .from('bodegones')
-    .select('numero')
-    .order('numero', { ascending: false })
-    .limit(1);
-  const max = data?.[0]?.numero || 0;
-  return max + 1;
 }

@@ -264,14 +264,84 @@ export async function diagnoseSupabase() {
   return report;
 }
 
-// ---------- GENERATE BODEGON (vía Netlify Function) ----------
-export async function generateBodegon({ skus, title, description }) {
-  const res = await fetch('/api/generate-bodegon', {
+// ---------- GENERATE BODEGON (Background Function + polling) ----------
+//
+// La función Netlify es de tipo "background" (15 min de timeout, devuelve 202
+// inmediatamente). Por eso aquí:
+//  1. Creamos la fila en Supabase (estado='generating')
+//  2. Disparamos la función background con la ref
+//  3. Hacemos polling sobre la fila hasta que estado pase a 'completed' o 'failed'
+
+function newBodegonRef() {
+  const d2 = () => String(Math.floor(Math.random() * 90) + 10);
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const a2 = () => A[Math.floor(Math.random() * 26)] + A[Math.floor(Math.random() * 26)];
+  const d3 = () => String(Math.floor(Math.random() * 900) + 100);
+  return `${d2()}${a2()}${d3()}`;
+}
+
+async function nextBodegonNumber() {
+  if (!SUPABASE_READY) return 1;
+  const { data } = await supabase
+    .from('bodegones')
+    .select('numero')
+    .order('numero', { ascending: false })
+    .limit(1);
+  return (data?.[0]?.numero || 0) + 1;
+}
+
+export async function startBodegonGeneration({ skus, title, description }) {
+  if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
+  if (!Array.isArray(skus) || skus.length === 0) throw new Error('Selecciona al menos un producto.');
+
+  const ref = newBodegonRef();
+  const numero = await nextBodegonNumber();
+  const finalTitle = title || `Bodegón IA #${numero}`;
+
+  const { error: insErr } = await supabase.from('bodegones').insert({
+    ref,
+    numero,
+    nombre: finalTitle,
+    descripcion: description || null,
+    productos: skus,
+    estado: 'generating',
+  });
+  if (insErr) throw new Error('No se pudo registrar el bodegón: ' + insErr.message);
+
+  // Disparar la función background. No esperamos al resultado porque Netlify
+  // devuelve 202 al instante; el resultado lo veremos al hacer polling.
+  fetch('/api/generate-bodegon', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ skus, title, description }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Error generando bodegón');
-  return json;
+    body: JSON.stringify({ ref }),
+  }).catch(e => console.warn('Trigger background:', e));
+
+  return { id: ref, n: numero, title: finalTitle, description, skus };
+}
+
+export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 5 * 60 * 1000, onTick } = {}) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const { data, error } = await supabase
+      .from('bodegones')
+      .select('*')
+      .eq('ref', ref)
+      .single();
+    if (error) throw new Error('Error consultando bodegón: ' + error.message);
+    if (!data) throw new Error('Bodegón no encontrado.');
+
+    onTick && onTick(data);
+    if (data.estado === 'completed') return rowToBodegon(data);
+    if (data.estado === 'failed') throw new Error(data.error_mensaje || 'La generación falló.');
+
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error('La generación está tardando demasiado. Inténtalo de nuevo más tarde.');
+}
+
+// Compatibilidad: API anterior que devolvía el bodegón completo en una sola llamada.
+export async function generateBodegon({ skus, title, description }) {
+  const created = await startBodegonGeneration({ skus, title, description });
+  const result = await pollBodegon(created.id);
+  return result;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
-import { generateBodegon } from '../lib/api.js';
+import { startBodegonGeneration, pollBodegon } from '../lib/api.js';
 
 export default function BodegonOverlay({
   open, onClose, products, selected,
@@ -9,6 +9,7 @@ export default function BodegonOverlay({
 }) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState(null);
   const [generated, setGenerated] = useState(null); // { id, image, image_path, title, description, skus }
   const [savedHint, setSavedHint] = useState(false);
@@ -17,43 +18,38 @@ export default function BodegonOverlay({
   const sorted = [...sel].sort((a, b) => b.h - a.h);
   const maxH = Math.max(...sel.map(p => p.h), 30);
 
-  useEffect(() => {
-    if (!open) return;
+  const runGeneration = async () => {
     setError(null);
     setGenerated(null);
     setGenerating(true);
-    (async () => {
-      try {
-        const result = await generateBodegon({
-          skus: selected,
-          title,
-          description: description || '',
-        });
-        setGenerated(result);
-        if (result.title) setTitle(result.title);
-      } catch (e) {
-        console.error(e);
-        setError(e.message || 'Error generando el bodegón.');
-      } finally {
-        setGenerating(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const handleRegen = async () => {
-    setError(null);
-    setGenerated(null);
-    setGenerating(true);
+    setElapsed(0);
+    const t0 = Date.now();
+    const tick = setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
     try {
-      const result = await generateBodegon({ skus: selected, title, description: description || '' });
+      const created = await startBodegonGeneration({
+        skus: selected,
+        title,
+        description: description || '',
+      });
+      if (created.title) setTitle(created.title);
+      const result = await pollBodegon(created.id);
       setGenerated(result);
     } catch (e) {
-      setError(e.message);
+      console.error(e);
+      setError(e.message || 'Error generando el bodegón.');
     } finally {
+      clearInterval(tick);
       setGenerating(false);
     }
   };
+
+  useEffect(() => {
+    if (!open) return;
+    runGeneration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const handleRegen = () => runGeneration();
 
   const handleSave = async () => {
     if (!generated) return;
@@ -96,7 +92,13 @@ export default function BodegonOverlay({
               <div className="bo-loading">
                 <div className="bo-loading-orb"/>
                 <div className="bo-loading-text">Generando con Gemini IA…</div>
-                <div className="bo-loading-sub">Aplicando iluminación de estudio · pirámide TRASERA → DELANTERA</div>
+                <div className="bo-loading-sub">
+                  {elapsed < 8 && 'Construyendo el prompt y enviando referencias'}
+                  {elapsed >= 8 && elapsed < 25 && 'Componiendo la pirámide TRASERA → MEDIA → DELANTERA'}
+                  {elapsed >= 25 && elapsed < 60 && 'Aplicando iluminación de estudio y sombras'}
+                  {elapsed >= 60 && 'Casi listo · ' + elapsed + 's'}
+                </div>
+                {elapsed > 0 && <div className="bo-loading-sub" style={{opacity:.6,marginTop:4}}>{elapsed}s</div>}
               </div>
             )}
 
