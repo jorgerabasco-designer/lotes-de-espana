@@ -275,7 +275,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                       <div className="lb-prod-img"><img src={p.img} alt=""/></div>
                       <div className="lb-prod-info">
                         <div className="lb-prod-n">{p.name}</div>
-                        <div className="lb-prod-m">{p.sku} · {p.h}×{p.w}×{p.d} cm</div>
+                        <div className="lb-prod-m">{p.brand || p.sku}</div>
                       </div>
                     </div>
                   );
