@@ -51,7 +51,7 @@ export default function Catalog({
           <p className="cat-sub">Selecciona productos gourmet y genera composiciones IA premium.</p>
         </div>
         <div className="cat-head-r">
-          <button className="btn btn-ghost" onClick={onImport}>{I.excel({ size: 16 })} Importar Excel</button>
+          <button className="btn btn-ghost" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
           <button className="btn btn-primary" onClick={onCreateProduct}>{I.upload({ size: 16 })} Subir producto</button>
         </div>
       </header>

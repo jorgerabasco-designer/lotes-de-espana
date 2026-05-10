@@ -8,7 +8,7 @@ import SettingsScreen from './components/SettingsScreen.jsx';
 import BodegonOverlay from './components/BodegonOverlay.jsx';
 import ImportExcelModal from './components/ImportExcelModal.jsx';
 import {
-  listProducts, upsertProduct, deleteProduct,
+  listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
   listBodegones, updateBodegon, deleteBodegon,
 } from './lib/api.js';
 import { SUPABASE_READY } from './lib/supabase.js';
@@ -157,22 +157,24 @@ export default function App() {
     }
   };
 
-  const handleImport = async (rows) => {
-    let added = 0;
-    for (const p of rows) {
+  const handleImport = async (item) => {
+    // item = { data: producto, photoFile?: File }
+    const { data, photoFile } = item;
+    let foto_path = null;
+    if (photoFile && data.sku) {
       try {
-        const saved = await upsertProduct({ ...p, tags: p.tags || [] });
-        setProducts(ps => {
-          const i = ps.findIndex(x => x.sku === saved.sku);
-          if (i >= 0) { const next = [...ps]; next[i] = saved; return next; }
-          return [saved, ...ps];
-        });
-        added++;
+        foto_path = await uploadProductPhoto(photoFile, data.sku);
       } catch (e) {
-        console.error('No se pudo importar', p.sku, e);
+        console.warn('No se pudo subir foto de', data.sku, e);
       }
     }
-    alert(`✓ Importados ${added} productos.`);
+    const saved = await upsertProduct({ ...data, foto_path });
+    setProducts(ps => {
+      const i = ps.findIndex(x => x.sku === saved.sku);
+      if (i >= 0) { const next = [...ps]; next[i] = saved; return next; }
+      return [saved, ...ps];
+    });
+    return saved;
   };
 
   const handleRenameBodegon = async (id, title) => {
@@ -247,6 +249,7 @@ export default function App() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         onImport={handleImport}
+        existingSkus={products.map(p => p.sku)}
       />
 
       <BodegonOverlay
