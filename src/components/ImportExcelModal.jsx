@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { I } from './icons.jsx';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
+import { optimizeImage, formatBytes } from '../lib/image-optimize.js';
 
 // Sinónimos aceptados en cabeceras del Excel (insensibles a mayúsculas/acentos)
 const FIELD_ALIASES = {
@@ -76,6 +77,7 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
   const [doneCount, setDoneCount] = useState(0);
+  const [savingsInfo, setSavingsInfo] = useState(null);
   const fileRef = useRef(null);
   const { } = useTaxonomy();
 
@@ -96,6 +98,7 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
       setBusy(false);
       setProgress(null);
       setDoneCount(0);
+      setSavingsInfo(null);
     }
   }, [open]);
 
@@ -242,15 +245,32 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
     setBusy(true);
     setStage('importing');
     setDoneCount(0);
+    let totalSaved = 0; // bytes ahorrados por compresión
+    let totalOptimized = 0; // nº fotos optimizadas
     try {
       let i = 0;
       for (const item of parsedProducts) {
-        setProgress({ current: item.data.sku, name: item.data.name, i, total: parsedProducts.length });
-        await onImport(item); // { data, photoFile }
+        setProgress({ current: item.data.sku, name: item.data.name, i, total: parsedProducts.length, phase: 'optimize' });
+        let finalItem = item;
+        if (item.photoFile) {
+          try {
+            const result = await optimizeImage(item.photoFile);
+            if (result.optimized) {
+              totalSaved += (result.originalSize - result.newSize);
+              totalOptimized++;
+            }
+            finalItem = { ...item, photoFile: result.file };
+          } catch (e) {
+            console.warn('Sin optimización para', item.data.sku, e);
+          }
+        }
+        setProgress({ current: item.data.sku, name: item.data.name, i, total: parsedProducts.length, phase: 'upload' });
+        await onImport(finalItem);
         i++;
         setDoneCount(i);
       }
       setStage('done');
+      setSavingsInfo({ optimized: totalOptimized, saved: totalSaved });
     } catch (e) {
       alert('Error durante la importación: ' + (e.message || e));
       setStage('review');
@@ -410,7 +430,9 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
               <div className="ie-prog-t">Importando productos…</div>
               <div className="ie-prog-s">
                 {progress?.current ? (
-                  <>Subiendo <strong>{progress.current}</strong> · {progress.i + 1} de {progress.total}</>
+                  <>
+                    {progress.phase === 'optimize' ? 'Optimizando' : 'Subiendo'} <strong>{progress.current}</strong> · {progress.i + 1} de {progress.total}
+                  </>
                 ) : 'Preparando…'}
               </div>
               <div className="ie-prog-bar">
@@ -430,6 +452,11 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
                 {doneCount} {doneCount === 1 ? 'producto añadido' : 'productos añadidos'} a tu catálogo
                 {newWithPhoto > 0 && ` (${newWithPhoto} con foto)`}.
               </div>
+              {savingsInfo && savingsInfo.saved > 0 && (
+                <div className="ie-done-savings">
+                  Optimizamos {savingsInfo.optimized} {savingsInfo.optimized === 1 ? 'imagen' : 'imágenes'} y ahorramos {formatBytes(savingsInfo.saved)} de almacenamiento.
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -539,6 +566,7 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
           @keyframes donePop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
           .ie-done-t{font-family:'Fraunces',serif;font-size:22px;color:var(--ink);margin-top:8px}
           .ie-done-s{font-size:13px;color:var(--muted);max-width:400px;line-height:1.55}
+          .ie-done-savings{margin-top:14px;padding:8px 14px;background:rgba(58,122,90,.08);border:1px solid rgba(58,122,90,.3);border-radius:99px;font-size:12px;color:#3a7a5a;font-weight:500;max-width:480px;line-height:1.5}
 
           .ie-foot{display:flex;justify-content:space-between;gap:8px;padding:16px 26px;border-top:1px solid var(--line);background:var(--paper)}
           .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:10px;font-size:13px;font-weight:550;transition:all .15s;border:1px solid transparent;cursor:pointer}

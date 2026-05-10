@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { I } from './icons.jsx';
 import { uploadProductPhoto } from '../lib/api.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
+import { optimizeImage, formatBytes } from '../lib/image-optimize.js';
 
 const EMPTY_PRODUCT = { sku: '', name: '', brand: '', cat: 'vinos', h: '', w: '', d: '', img: '', tags: [], desc: '', posicion: '', descripcion_visual: '', notas: '' };
 
@@ -13,6 +14,8 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   const [dragOver, setDragOver] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optInfo, setOptInfo] = useState(null);
   const fileRef = useRef(null);
 
   const { catOpts, tags: taxTags } = useTaxonomy();
@@ -24,29 +27,50 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   useEffect(() => {
     setForm(product ? { ...EMPTY_PRODUCT, ...product } : EMPTY_PRODUCT);
     setPendingFile(null);
+    setOptInfo(null);
     setSavedSuccess(false);
     setErrorMsg(null);
     setBusy(false);
-    // Si vienen con un archivo (drag&drop desde el catálogo), pre-cargarlo
+    // Si vienen con un archivo (drag&drop desde el catálogo), pre-cargarlo + optimizar
     if (open && initialFile instanceof File && initialFile.type.startsWith('image/')) {
-      setPendingFile(initialFile);
-      const url = URL.createObjectURL(initialFile);
-      setForm(f => ({ ...f, img: url }));
+      handleFile(initialFile);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product, open, initialFile]);
 
   if (!open) return null;
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleFile = (file) => {
+  const handleFile = async (file) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       alert('El archivo tiene que ser una imagen (PNG, JPG, WEBP).');
       return;
     }
-    setPendingFile(file);
-    const url = URL.createObjectURL(file);
-    upd('img', url);
+    setOptimizing(true);
+    setOptInfo(null);
+    try {
+      const result = await optimizeImage(file);
+      setPendingFile(result.file);
+      const url = URL.createObjectURL(result.file);
+      upd('img', url);
+      if (result.optimized) {
+        setOptInfo({
+          message: `Optimizada · ${formatBytes(result.originalSize)} → ${formatBytes(result.newSize)}`,
+          ratio: Math.round((1 - result.newSize / result.originalSize) * 100),
+        });
+      } else {
+        setOptInfo({ message: `Sin cambios · ${formatBytes(file.size)}`, ratio: 0 });
+      }
+    } catch (e) {
+      console.warn('No se pudo optimizar, usando original', e);
+      setPendingFile(file);
+      const url = URL.createObjectURL(file);
+      upd('img', url);
+      setOptInfo(null);
+    } finally {
+      setOptimizing(false);
+    }
   };
 
   const handleDragOver = (e) => {
@@ -71,6 +95,7 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   const handleClear = (e) => {
     e.stopPropagation();
     setPendingFile(null);
+    setOptInfo(null);
     upd('img', '');
     upd('foto_path', null);
   };
@@ -112,13 +137,19 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
         <div className="ov-body">
           <div className="ov-left">
             <div
-              className={`img-drop ${form.img ? 'has-image' : ''} ${dragOver ? 'over' : ''}`}
-              onClick={() => fileRef.current?.click()}
+              className={`img-drop ${form.img ? 'has-image' : ''} ${dragOver ? 'over' : ''} ${optimizing ? 'optimizing' : ''}`}
+              onClick={() => !optimizing && fileRef.current?.click()}
               onDragOver={handleDragOver}
               onDragEnter={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
+              {optimizing && (
+                <div className="img-overlay">
+                  <div className="img-spinner"/>
+                  <div className="img-overlay-t">Optimizando…</div>
+                </div>
+              )}
               {form.img ? (
                 <img src={form.img} alt="" draggable={false}/>
               ) : (
@@ -154,6 +185,12 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
                 onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
               />
             </div>
+            {optInfo && (
+              <div className={`img-optinfo ${optInfo.ratio > 0 ? 'reduced' : 'unchanged'}`}>
+                {optInfo.ratio > 0 && <span className="opt-pct">−{optInfo.ratio}%</span>}
+                <span>{optInfo.message}</span>
+              </div>
+            )}
           </div>
 
           <div className="ov-right">
@@ -283,6 +320,16 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
         .img-icon{width:46px;height:46px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:8px}
         .img-t{font-size:13.5px;font-weight:600;color:var(--ink)}
         .img-s{font-size:11.5px;color:var(--muted);line-height:1.5;max-width:240px}
+
+        .img-overlay{position:absolute;inset:0;background:rgba(250,250,247,.85);backdrop-filter:blur(4px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;z-index:6;border-radius:14px;animation:fadeIn .15s ease}
+        .img-overlay-t{font-size:12.5px;font-weight:600;color:var(--ink-2);letter-spacing:.04em}
+        .img-spinner{width:32px;height:32px;border-radius:50%;border:2.5px solid var(--accent-soft);border-top-color:var(--accent);animation:spin .9s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .img-drop.optimizing{cursor:wait}
+
+        .img-optinfo{display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:6px 11px;border-radius:99px;font-size:11.5px;font-weight:500;background:var(--paper);border:1px solid var(--line);color:var(--ink-2)}
+        .img-optinfo.reduced{background:rgba(58,122,90,.06);border-color:rgba(58,122,90,.3);color:#3a7a5a}
+        .opt-pct{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:11px}
 
         .img-actions{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:5}
         .img-replace{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:#fff;border:1px solid var(--line);border-radius:8px;font-size:11.5px;font-weight:600;color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.06);transition:all .15s}
