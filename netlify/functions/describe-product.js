@@ -4,17 +4,37 @@
 //   returns: { description: "..." }
 //
 // Variables de entorno requeridas:
-//   GEMINI_API_KEY
-//   SUPABASE_URL  (para poder descargar imágenes por foto_path)
+//   ANTHROPIC_API_KEY  (consola.anthropic.com → API Keys)
+//   SUPABASE_URL       (para poder descargar imágenes por foto_path)
 //
-// Usa Gemini Flash (~50× más barato que Pro y suficiente para texto desde imagen).
+// Variables opcionales:
+//   CLAUDE_DESCRIBE_MODEL  (por defecto claude-haiku-4-5)
+//
+// Usa Claude (Anthropic) porque su visión es notablemente mejor que Gemini Flash
+// para descripciones detalladas de packaging.
 
-const PROMPT = `Describe this product photo in 1 sentence in English (max 30 words).
-Focus on: packaging type (bottle / box / tin / jar), dominant colours, label design (text, illustrations, logos), and any distinctive feature. Be concrete and specific.
-Example output: "dark glass bottle with vibrant purple label, yellow sun graphic, and purple cap".
-Do NOT add commentary, do NOT mention the product name, do NOT use the word "product". Output the description text only.`;
+const MODEL = process.env.CLAUDE_DESCRIBE_MODEL || 'claude-haiku-4-5';
 
-const MODEL = process.env.GEMINI_DESCRIBE_MODEL || 'gemini-2.5-flash';
+const PROMPT = `You are a product photo analyst for a Spanish gourmet catalog. Look at the attached product photo and describe it in ONE detailed sentence in English (max 40 words).
+
+Cover, in this order:
+1. Package type and shape (jar, bottle, can, box, tin, pouch, pot, etc.)
+2. Material and dominant colours of the package
+3. Label design: brand name (if visible), illustrations, typography style
+4. Visible contents through transparent parts (if any)
+5. Distinctive elements (cap, lid, capsule, seal, ribbon, sticker, hanging tag)
+
+Examples of the expected style and level of detail:
+- "dark glass bottle with vibrant purple label, yellow sun graphic, purple metal cap, and embossed branding on the shoulder"
+- "flat rectangular tin in landscape orientation, watercolour illustrations of fish and green olives around a navy central label with gold lettering"
+- "small cube glass jar with black metal lid and green spoon-shaped tag-style label hanging from the lid, roasted Marcona almonds visible inside"
+- "tall narrow rectangular cardboard box, mustard yellow with green botanical illustrations of cocoa pods and leaves, and a white central label"
+
+Rules:
+- Output ONLY the description text — no preamble, no markdown, no quotes, no ending period if not needed.
+- Be specific. Use exact colours, shapes, and label words you can read.
+- Do not use the word "product" itself.
+- Do not describe lighting or background.`;
 
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -24,9 +44,12 @@ export const handler = async (event) => {
     return json(405, { error: 'Método no permitido. Usa POST.' });
   }
 
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) {
-    return json(500, { error: 'Falta GEMINI_API_KEY en las variables de entorno de Netlify.' });
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) {
+    return json(500, {
+      error:
+        'Falta ANTHROPIC_API_KEY en Netlify. Crea una en console.anthropic.com → API Keys y añádela en Site settings → Environment variables.',
+    });
   }
 
   let body;
@@ -57,38 +80,54 @@ export const handler = async (event) => {
     return json(400, { error: 'Falta la imagen del producto (image en base64 o foto_path).' });
   }
 
+  // Claude no acepta image/jpg → image/jpeg
+  let mediaType = (mimeType || 'image/png').toLowerCase();
+  if (mediaType === 'image/jpg') mediaType = 'image/jpeg';
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mediaType)) {
+    mediaType = 'image/png';
+  }
+
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${geminiKey}`;
-    const r = await fetch(url, {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+      },
       body: JSON.stringify({
-        contents: [{
+        model: MODEL,
+        max_tokens: 256,
+        messages: [{
           role: 'user',
-          parts: [
-            { text: PROMPT },
-            { inlineData: { mimeType: mimeType || 'image/png', data: image } },
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: image } },
+            { type: 'text', text: PROMPT },
           ],
         }],
-        generationConfig: {
-          temperature: 0.4,
-          maxOutputTokens: 120,
-        },
       }),
     });
+
     const j = await r.json();
     if (!r.ok) {
-      return json(500, { error: `Gemini ${r.status}: ${j?.error?.message || 'error'}` });
+      const msg = j?.error?.message || `HTTP ${r.status}`;
+      return json(500, { error: `Claude ${r.status}: ${msg}` });
     }
-    const text = j?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+    const text = j?.content?.[0]?.text?.trim();
     if (!text) {
-      return json(500, { error: 'Gemini no devolvió texto. ' + (j?.candidates?.[0]?.finishReason || '') });
+      return json(500, { error: 'Claude no devolvió texto. ' + (j?.stop_reason || '') });
     }
-    // Limpiar comillas iniciales/finales si las trae
-    const clean = text.replace(/^["']+|["']+$/g, '').trim();
-    return json(200, { description: clean });
+
+    // Limpiar comillas, saltos múltiples, puntos finales sueltos
+    const clean = text
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return json(200, { description: clean, model: MODEL });
   } catch (e) {
-    return json(500, { error: 'Error contactando con Gemini: ' + (e.message || e) });
+    return json(500, { error: 'Error contactando con Anthropic: ' + (e.message || e) });
   }
 };
 
