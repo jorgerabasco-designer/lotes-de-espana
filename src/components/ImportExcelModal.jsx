@@ -342,7 +342,12 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
                   <div className="ie-tip-s">
                     Sube el Excel y las fotos de los productos con la referencia como nombre del archivo.
                     Los productos con referencia ya existente en tu catálogo se omitirán automáticamente
-                    para no crear duplicados. <a href="/plantilla-productos.xlsx" download className="ie-template-link">Descargar plantilla Excel</a>
+                    para no crear duplicados.
+                    <span className="ie-tip-links">
+                      <a href="/plantilla-productos.xlsx" download className="ie-template-link">Descargar plantilla Excel</a>
+                      <span className="ie-link-sep">·</span>
+                      <a href="/guia-fotografia.pdf" target="_blank" rel="noopener" className="ie-template-link">Guía de fotografía (PDF)</a>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -521,8 +526,10 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
           .ie-tip-l{color:var(--accent);margin-top:1px}
           .ie-tip-t{font-size:13px;font-weight:600;color:var(--ink)}
           .ie-tip-s{font-size:12px;color:var(--ink-2);margin-top:3px;line-height:1.55}
+          .ie-tip-links{display:inline-flex;align-items:center;gap:4px;margin-top:4px;display:block}
           .ie-template-link{color:var(--accent);font-weight:600;text-decoration:underline}
           .ie-template-link:hover{text-decoration:none}
+          .ie-link-sep{color:var(--muted);margin:0 6px}
 
           .ie-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
           .ie-sum-stat{padding:14px;background:var(--paper);border:1px solid var(--line);border-radius:10px;text-align:center}

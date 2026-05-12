@@ -29,6 +29,8 @@ function rowToProduct(row) {
     foto_path: row.foto_path || null,
     tags: row.tags || [],
     used: row.used_count || 0,
+    updated_at: row.updated_at || null,
+    created_at: row.created_at || null,
   };
 }
 
@@ -71,7 +73,32 @@ export async function listProducts() {
     .select('*')
     .order('updated_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(rowToProduct);
+  const products = (data || []).map(rowToProduct);
+
+  // Calcular 'used' dinámicamente: cuántas veces aparece cada SKU en los
+  // bodegones guardados en el historial (estado='completed'). Más fiable
+  // que llevar un contador manualmente.
+  try {
+    const { data: bods } = await supabase
+      .from('bodegones')
+      .select('productos')
+      .eq('estado', 'completed');
+    if (bods && bods.length) {
+      const usage = {};
+      for (const b of bods) {
+        for (const sku of (b.productos || [])) {
+          usage[sku] = (usage[sku] || 0) + 1;
+        }
+      }
+      for (const p of products) {
+        p.used = usage[p.sku] || 0;
+      }
+    }
+  } catch (e) {
+    console.warn('No se pudo calcular uso de productos en bodegones:', e);
+  }
+
+  return products;
 }
 
 export async function upsertProduct(product) {
@@ -304,6 +331,36 @@ export async function diagnoseSupabase() {
   }
 
   return report;
+}
+
+// ---------- DESCRIBE PRODUCT (vía Netlify Function, Gemini Flash) ----------
+// Genera una descripción visual en inglés a partir de la foto del producto.
+//   Si tienes el archivo en el navegador (aún no subido): pasa { file }
+//   Si la foto ya está en Storage: pasa { foto_path }
+export async function describeProduct({ file, foto_path } = {}) {
+  let body;
+  if (file instanceof Blob) {
+    const base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+    body = { image: base64, mimeType: file.type || 'image/png' };
+  } else if (foto_path) {
+    body = { foto_path };
+  } else {
+    throw new Error('Sin foto: pasa "file" o "foto_path".');
+  }
+
+  const res = await fetch('/api/describe-product', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Error generando descripción');
+  return json.description;
 }
 
 // ---------- GENERATE BODEGON (Background Function + polling) ----------

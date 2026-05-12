@@ -19,12 +19,19 @@ const DensityIcon = ({ n }) => {
 export default function Catalog({
   products, selected, onToggle,
   query, setQuery, sort, setSort,
-  cat, tags, selBrands = [],
+  cat, setCat, tags, setTags,
+  selBrands = [], setSelBrands,
+  cats = [], allTags = [], brands = [],
   onCreate, onCreateProduct, onClearSel, onImport,
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const [cols, setCols] = useState(() => Number(localStorage.getItem('catalog-cols')) || 4);
   const setColsP = (n) => { setCols(n); localStorage.setItem('catalog-cols', String(n)); };
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const activeFilters = (cat !== 'all' ? 1 : 0) + tags.length + selBrands.length;
+  const toggleTag = (id) => setTags(tags.includes(id) ? tags.filter(x => x !== id) : [...tags, id]);
+  const toggleBrand = (b) => setSelBrands(selBrands.includes(b) ? selBrands.filter(x => x !== b) : [...selBrands, b]);
 
   const SORT_LABELS = { used: 'Más usados', recent: 'Más recientes', az: 'A → Z', za: 'Z → A' };
 
@@ -39,7 +46,16 @@ export default function Catalog({
   const sorted = [...filtered].sort((a, b) => {
     if (sort === 'az') return a.name.localeCompare(b.name, 'es');
     if (sort === 'za') return b.name.localeCompare(a.name, 'es');
-    if (sort === 'used') return (b.used || 0) - (a.used || 0);
+    if (sort === 'used') {
+      // Si hay empate por nº de usos, desempata por nombre para que sea estable.
+      const diff = (b.used || 0) - (a.used || 0);
+      return diff !== 0 ? diff : a.name.localeCompare(b.name, 'es');
+    }
+    if (sort === 'recent') {
+      const da = new Date(a.updated_at || a.created_at || 0).getTime();
+      const db = new Date(b.updated_at || b.created_at || 0).getTime();
+      return db - da;
+    }
     return 0;
   });
 
@@ -51,7 +67,6 @@ export default function Catalog({
           <p className="cat-sub">Selecciona productos gourmet y genera composiciones IA premium.</p>
         </div>
         <div className="cat-head-r">
-          <button className="btn btn-ghost" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
           <button className="btn btn-primary" onClick={onCreateProduct}>{I.plus({ size: 16 })} Nuevo producto</button>
         </div>
       </header>
@@ -80,6 +95,11 @@ export default function Catalog({
             </>
           )}
         </div>
+        <button className="tool mobile-only" onClick={() => setFiltersOpen(true)}>
+          {I.filter({ size: 15 })}
+          Filtros
+          {activeFilters > 0 && <span className="filter-badge">{activeFilters}</span>}
+        </button>
         <div className="density">
           {[4, 6, 8].map(n => (
             <button key={n} className={`dens ${cols === n ? 'on' : ''}`} onClick={() => setColsP(n)} title={`${n} columnas`}>
@@ -88,6 +108,56 @@ export default function Catalog({
           ))}
         </div>
       </div>
+
+      {filtersOpen && (
+        <div className="mob-filters-bg" onClick={() => setFiltersOpen(false)}>
+          <div className="mob-filters" onClick={e => e.stopPropagation()}>
+            <header className="mob-filters-h">
+              <h3>Filtros</h3>
+              <button className="mob-filters-x" onClick={() => setFiltersOpen(false)}>{I.close({ size: 18 })}</button>
+            </header>
+            <div className="mob-filters-body">
+              <div className="filter-label">Categorías</div>
+              <div className="pill-row">
+                <button className={`spill ${cat === 'all' ? 'on' : ''}`} onClick={() => setCat('all')}>Todos</button>
+                {cats.map(c => (
+                  <button key={c.id} className={`spill ${cat === c.id ? 'on' : ''}`} onClick={() => setCat(c.id)}>{c.label}</button>
+                ))}
+              </div>
+
+              {allTags.length > 0 && (
+                <>
+                  <div className="filter-label">Etiquetas</div>
+                  <div className="pill-row">
+                    {allTags.map(t => (
+                      <button key={t.id} className={`spill stag ${tags.includes(t.id) ? 'on' : ''}`} onClick={() => toggleTag(t.id)}>{t.label}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {brands.length > 0 && (
+                <>
+                  <div className="filter-label">Marcas</div>
+                  <div className="pill-row">
+                    {brands.map(b => (
+                      <button key={b} className={`spill sbrand ${selBrands.includes(b) ? 'on' : ''}`} onClick={() => toggleBrand(b)}>{b}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <footer className="mob-filters-foot">
+              <button
+                className="btn btn-ghost"
+                onClick={() => { setCat('all'); setTags([]); setSelBrands([]); }}
+                disabled={activeFilters === 0}
+              >Limpiar</button>
+              <button className="btn btn-primary" onClick={() => setFiltersOpen(false)}>Aplicar</button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {selected.length > 0 && (
         <div className="selbar">
@@ -152,6 +222,35 @@ export default function Catalog({
         .btn-create:hover{background:#fff;transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
 
         .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding-bottom:20px}
+
+        /* Botón "Filtros" — solo visible en móvil */
+        .mobile-only{display:none}
+        .filter-badge{display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 4px;font-size:10px;font-weight:700;background:var(--accent);color:#fff;border-radius:99px;margin-left:2px}
+
+        /* Panel de filtros (bottom-sheet en móvil) */
+        .mob-filters-bg{position:fixed;inset:0;background:rgba(20,16,12,.45);backdrop-filter:blur(6px);z-index:400;display:flex;align-items:flex-end;justify-content:center;animation:fadeIn .15s ease}
+        .mob-filters{background:#FAFAF7;width:100%;max-width:560px;max-height:85vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;animation:slideIn .25s cubic-bezier(.2,.8,.2,1)}
+        .mob-filters-h{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid var(--line)}
+        .mob-filters-h h3{margin:0;font-family:'Fraunces',serif;font-weight:500;font-size:20px;color:var(--ink)}
+        .mob-filters-x{width:32px;height:32px;border-radius:8px;color:var(--muted);display:grid;place-items:center;background:transparent;border:none;cursor:pointer}
+        .mob-filters-x:hover{background:var(--bg);color:var(--ink)}
+        .mob-filters-body{padding:18px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px}
+        .mob-filters-body .filter-label{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-top:14px;padding:0 2px}
+        .mob-filters-body .filter-label:first-child{margin-top:0}
+        .mob-filters-body .pill-row{display:flex;flex-wrap:wrap;gap:6px;padding:0 2px}
+        .mob-filters-body .spill{padding:6px 12px;border-radius:99px;font-size:12.5px;color:var(--ink-2);background:transparent;border:1px solid var(--line);font-weight:500;transition:all .12s;cursor:pointer;font-family:inherit}
+        .mob-filters-body .spill:hover{background:#fff;color:var(--ink);border-color:#cdc4b3}
+        .mob-filters-body .spill.on{background:var(--ink);color:#FAFAF7;border-color:var(--ink)}
+        .mob-filters-body .stag.on, .mob-filters-body .sbrand.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+        .mob-filters-foot{display:flex;gap:8px;padding:16px 20px;border-top:1px solid var(--line);background:#fff}
+        .mob-filters-foot .btn{flex:1;justify-content:center;padding:12px 16px}
+        .mob-filters-foot .btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink)}
+        .mob-filters-foot .btn-primary{background:var(--accent);color:#fff;border:1px solid var(--accent)}
+        .mob-filters-foot .btn:disabled{opacity:.5}
+
+        @media (max-width: 900px){
+          .mobile-only{display:inline-flex !important;align-items:center !important;gap:5px !important;height:42px !important;padding:0 14px !important}
+        }
       `}</style>
     </section>
   );
@@ -202,14 +301,18 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
             <span className="psku">{p.sku}</span>
           </div>
         </div>
-        {(p.tags || []).length > 0 && (
-          <div className="ptag-row">
-            {(p.tags || []).slice(0, 3).map(t => {
-              const lbl = tagLabels[t] || t;
-              return <span key={t} className="ptag">{lbl}</span>;
-            })}
-          </div>
-        )}
+        {(() => {
+          // Renderizamos siempre el contenedor (aunque esté vacío) para reservar
+          // su altura y mantener todas las cards alineadas en el grid.
+          const validTags = (p.tags || []).filter(t => tagLabels[t]);
+          return (
+            <div className="ptag-row" aria-hidden={validTags.length === 0 ? 'true' : undefined}>
+              {validTags.slice(0, 3).map(t => (
+                <span key={t} className="ptag">{tagLabels[t]}</span>
+              ))}
+            </div>
+          );
+        })()}
       </div>
       <style>{`
         .pcard{position:relative;background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;cursor:pointer;transition:all .2s cubic-bezier(.2,.8,.2,1);overflow:hidden;text-align:left;width:100%;display:block;-webkit-tap-highlight-color:transparent}
@@ -249,7 +352,7 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
         .pname{font-size:14.5px;font-weight:600;color:var(--ink);line-height:1.3;letter-spacing:-.005em;font-family:'Fraunces',serif}
         .pmeta{font-size:11.5px;color:var(--muted);margin-top:5px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
         .pmeta-l{display:flex;align-items:center;gap:6px;min-width:0}
-        .ptag-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+        .ptag-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;min-height:22px}
         .ptag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);font-weight:600;background:var(--bg);border:1px solid var(--line);padding:3px 7px;border-radius:99px}
         .pcard.sel .ptag{background:#fff;border-color:var(--accent-soft);color:var(--accent)}
         .psku{letter-spacing:.4px;font-weight:500}

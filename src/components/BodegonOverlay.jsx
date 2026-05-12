@@ -201,7 +201,7 @@ export default function BodegonOverlay({
             rows={4}
           />
 
-          <div className="bo-section-h">Productos</div>
+          <div className="bo-section-h">Productos ({sel.length})</div>
           <div className="bo-prods">
             {sel.map(p => (
               <div key={p.sku} className="bo-prod">

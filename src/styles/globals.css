@@ -53,26 +53,42 @@ input,select,textarea{font-family:inherit;color:inherit}
 @media (max-width: 900px){
   .app{flex-direction:column;align-items:stretch}
 
-  /* Sidebar como barra superior */
+  /* Sidebar como barra superior con tabs (texto + scroll horizontal) */
   .sidebar{
     position:sticky !important;top:0;
     width:100% !important;flex:0 0 auto !important;
     height:auto !important;
     flex-direction:row !important;
-    padding:10px 14px !important;
+    padding:10px 12px !important;
     border-right:none !important;
     border-bottom:1px solid var(--line);
-    gap:10px;
+    gap:8px;
     z-index:50;
     background:#FAFAF7;
+    align-items:center;
   }
   .sidebar .brand{padding:0 !important;margin:0 !important;flex:0 0 auto}
   .sidebar .brand-text{display:none}
-  .sidebar .nav{flex-direction:row !important;flex:1;justify-content:center;padding:0 !important;gap:4px !important;overflow-x:auto}
-  .sidebar .nav-item{padding:8px 10px !important;font-size:12.5px !important}
-  .sidebar .nav-text{display:none}
-  .sidebar .nav-item.on .nav-text,
-  .sidebar .nav-icon{display:inline-grid}
+  .sidebar .nav{
+    flex-direction:row !important;
+    flex:1;
+    justify-content:flex-start !important;
+    padding:0 !important;
+    gap:4px !important;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .sidebar .nav::-webkit-scrollbar{display:none}
+  .sidebar .nav-item{
+    padding:8px 12px !important;
+    font-size:13px !important;
+    white-space:nowrap !important;
+    flex-shrink:0 !important;
+    border-radius:99px !important;
+  }
+  .sidebar .nav-item.on{border:1px solid var(--line) !important}
+  .sidebar .nav-text{display:inline !important}
   .sidebar .filters{display:none !important}
   .sidebar .sb-foot{padding:0 !important;border-top:none !important;flex:0 0 auto}
   .sidebar .user-meta{display:none}
@@ -86,13 +102,17 @@ input,select,textarea{font-family:inherit;color:inherit}
   .cat-head{align-items:flex-start !important;gap:14px !important}
   .cat-sub{font-size:13px !important}
 
-  /* Grid: forzar 2 columnas como mínimo legible */
+  /* Catálogo en móvil: ocultar botones de cabecera y selector de columnas. */
+  /* La acción de importar / nuevo producto se hace desde Productos. */
+  .catalog .cat-head-r{display:none !important}
+  .catalog .density{display:none !important}
+
+  /* Grid: forzar 2 columnas siempre en móvil */
   .catalog .grid,
   .hist-screen .hgrid{grid-template-columns:repeat(2,1fr) !important;gap:12px !important}
 
   /* Toolbar más pegado */
   .toolbar{gap:6px !important}
-  .toolbar .density,
   .toolbar .sort-wrap{flex-shrink:0}
 
   /* Settings: nav arriba como pills */
@@ -108,22 +128,31 @@ input,select,textarea{font-family:inherit;color:inherit}
   .ptable{border:none !important;background:transparent !important}
   .prow.phead{display:none !important}
   .prow{
-    grid-template-columns:60px 1fr 40px !important;
+    position:relative !important;
+    grid-template-columns:60px 1fr !important;
     background:#fff;
     border:1px solid var(--line) !important;
     border-radius:12px;
-    margin-bottom:8px;
-    padding:12px !important;
-    gap:10px !important;
+    margin-bottom:10px;
+    padding:14px 14px 48px 14px !important;
+    gap:12px !important;
   }
   .pc-sku, .pc-cat, .pc-dim, .pc-tags{
     grid-column:1 / -1;
-    padding-left:70px;
+    padding-left:72px;
     font-size:11.5px !important;
     color:var(--muted);
   }
   .pc-sku::before{content:"Ref. "}
   .pc-dim::before{content:""}
+  .pc-act{
+    position:absolute !important;
+    bottom:8px !important;
+    right:8px !important;
+    grid-column:unset !important;
+    justify-content:flex-end !important;
+  }
+  .pc-act .iconbtn-l{background:var(--paper) !important;border:1px solid var(--line) !important}
 
   /* Bodegón overlay: stack vertical en móvil */
   .bo-modal{grid-template-columns:1fr !important}
@@ -135,10 +164,19 @@ input,select,textarea{font-family:inherit;color:inherit}
   .lb-stage{min-height:280px !important;border-right:none !important;border-bottom:1px solid var(--line)}
   .lb-side{padding:24px 20px !important}
 
-  /* Modal de subir producto */
-  .ov-body{grid-template-columns:1fr !important;padding:18px 22px !important}
-  .ov-head{padding:18px 22px !important}
+  /* Modal de subir producto como bottom-sheet en móvil */
+  .ov-bg{padding:0 !important;align-items:flex-end !important}
+  .ov{
+    width:100% !important;
+    max-width:100% !important;
+    max-height:96vh !important;
+    border-radius:18px 18px 0 0 !important;
+  }
+  .ov-body{grid-template-columns:1fr !important;padding:18px 18px !important;gap:18px !important}
+  .ov-head{padding:16px 20px !important;position:sticky;top:0;background:#FAFAF7;z-index:2}
+  .ov-foot{position:sticky;bottom:0;padding:14px 20px !important;z-index:2}
   .ov-title{font-size:20px !important}
+  .ov-left .img-drop{height:200px !important}
 
   /* Modal de descarga */
   .dl{padding:18px !important}
@@ -146,15 +184,9 @@ input,select,textarea{font-family:inherit;color:inherit}
 
 @media (max-width: 600px){
   .cat-title{font-size:26px !important}
-  .cat-head-r{flex-wrap:wrap}
-  .cat-head-r .btn{flex:1;justify-content:center}
 
   .toolbar{flex-wrap:wrap !important}
   .toolbar .search{width:100%;order:-1}
-
-  /* En el móvil más pequeño: 1 columna */
-  .catalog .grid,
-  .hist-screen .hgrid{grid-template-columns:1fr !important}
 
   /* Selbar más compacto */
   .selbar{padding:10px 12px !important}
@@ -163,4 +195,11 @@ input,select,textarea{font-family:inherit;color:inherit}
   /* Bodegón loading text */
   .bo-loading-text{font-size:16px !important}
   .bo-loading-sub{font-size:11.5px !important;padding:0 20px}
+
+  /* En móvil estrecho la card de producto tiene menos padding */
+  .catalog .pcard{padding:12px !important;border-radius:14px !important}
+  .catalog .pcard-img{margin-bottom:10px !important;padding:10px !important}
+  .catalog .pname{font-size:13px !important}
+  .catalog .pmeta{font-size:11px !important}
+  .catalog .ptag{font-size:9px !important;padding:2px 6px !important}
 }

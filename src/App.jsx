@@ -213,7 +213,10 @@ export default function App() {
           products={products} selected={selected} onToggle={toggle}
           query={query} setQuery={setQuery}
           sort={sort} setSort={setSort}
-          cat={cat} tags={tags} selBrands={selBrands}
+          cat={cat} setCat={setCat}
+          tags={tags} setTags={setTags}
+          selBrands={selBrands} setSelBrands={setSelBrands}
+          cats={cats} allTags={allTags} brands={brands}
           onCreate={handleCreate}
           onClearSel={clearSel}
           onCreateProduct={openNew}
@@ -222,7 +225,13 @@ export default function App() {
       )}
 
       {!loading && active === 'products' && (
-        <ProductsScreen products={products} onEdit={openEdit} onDelete={handleDeleteProduct} onNew={openNew}/>
+        <ProductsScreen
+          products={products}
+          onEdit={openEdit}
+          onDelete={handleDeleteProduct}
+          onNew={openNew}
+          onImport={() => setImportOpen(true)}
+        />
       )}
 
       {!loading && active === 'history' && (

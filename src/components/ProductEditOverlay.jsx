@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { I } from './icons.jsx';
-import { uploadProductPhoto } from '../lib/api.js';
+import { uploadProductPhoto, describeProduct } from '../lib/api.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
 import { optimizeImage, formatBytes } from '../lib/image-optimize.js';
 
@@ -16,6 +16,7 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   const [errorMsg, setErrorMsg] = useState(null);
   const [optimizing, setOptimizing] = useState(false);
   const [optInfo, setOptInfo] = useState(null);
+  const [genDescBusy, setGenDescBusy] = useState(false);
   const fileRef = useRef(null);
 
   const { catOpts, tags: taxTags } = useTaxonomy();
@@ -100,11 +101,54 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
     upd('foto_path', null);
   };
 
+  const handleGenerateDesc = async () => {
+    if (genDescBusy) return;
+    if (!pendingFile && !form.foto_path) {
+      alert('Sube primero una foto del producto.');
+      return;
+    }
+    setGenDescBusy(true);
+    try {
+      const description = await describeProduct(
+        pendingFile ? { file: pendingFile } : { foto_path: form.foto_path }
+      );
+      if (description) upd('descripcion_visual', description);
+    } catch (e) {
+      alert('Error generando descripción: ' + (e.message || e));
+    } finally {
+      setGenDescBusy(false);
+    }
+  };
+
+  // Formato de referencia: 2 dígitos + 2 letras + 3 dígitos (ej. 03TC316).
+  const REF_REGEX = /^[0-9]{2}[A-Z]{2}[0-9]{3}$/;
+
   const handleSave = async () => {
     setErrorMsg(null);
+
+    // Validaciones antes de tocar nada
+    if (!form.name?.trim()) {
+      setErrorMsg('El nombre del producto es obligatorio.');
+      return;
+    }
+    if (!form.sku) {
+      setErrorMsg('La referencia (RP) es obligatoria.');
+      return;
+    }
+    if (!REF_REGEX.test(form.sku)) {
+      setErrorMsg(
+        `La referencia "${form.sku}" no es válida. Debe ser exactamente 2 dígitos + 2 letras + 3 dígitos (7 caracteres). Ejemplo: 03TC316.`
+      );
+      return;
+    }
+
     setBusy(true);
     try {
       let next = { ...form };
+      // Sanear etiquetas: filtrar solo las que existen en la taxonomía actual.
+      const validTagIds = new Set((taxTags || []).map(t => t.id));
+      next.tags = (next.tags || []).filter(t => validTagIds.has(t));
+
       if (pendingFile && next.sku) {
         try {
           const path = await uploadProductPhoto(pendingFile, next.sku);
@@ -115,10 +159,19 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
       }
       await onSave(next);
       setSavedSuccess(true);
-      // Cerrar tras la animación
       setTimeout(() => onClose && onClose(), 1100);
     } catch (e) {
-      setErrorMsg(e.message || 'Error al guardar el producto.');
+      const raw = e.message || String(e);
+      let msg = raw;
+      // Traducir errores comunes de Supabase a mensajes amigables.
+      if (/ref_format|check constraint/i.test(raw)) {
+        msg = `La referencia "${form.sku}" no es válida. Debe ser 2 dígitos + 2 letras + 3 dígitos. Ejemplo: 03TC316.`;
+      } else if (/duplicate key|already exists/i.test(raw)) {
+        msg = `Ya existe un producto con la referencia "${form.sku}". Usa otra distinta.`;
+      } else if (/violates not-null/i.test(raw)) {
+        msg = 'Falta algún campo obligatorio (nombre, marca o dimensiones).';
+      }
+      setErrorMsg(msg);
       setBusy(false);
     }
   };
@@ -199,7 +252,15 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
               <Field label="Marca" v={form.brand} onChange={v => upd('brand', v)}/>
             </div>
             <div className="frow">
-              <Field label="Referencia (RP)" v={form.sku} onChange={v => upd('sku', v.toUpperCase())} mono placeholder="03TC316"/>
+              <Field
+                label="Referencia (RP)"
+                v={form.sku}
+                onChange={v => upd('sku', v.toUpperCase())}
+                mono
+                placeholder="03TC316"
+                hint="2 dígitos + 2 letras + 3 dígitos"
+                maxLength={7}
+              />
               <Field label="Categoría" type="select" v={form.cat} onChange={v => upd('cat', v)} opts={catOptions}/>
             </div>
 
@@ -248,7 +309,23 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
               })}
             </div>
 
-            <div className="section-h">Descripción visual (para el prompt de IA)</div>
+            <div className="section-h-row">
+              <div className="section-h">Descripción visual (para el prompt de IA)</div>
+              <button
+                type="button"
+                className={`ai-gen-btn ${form.descripcion_visual ? 'subtle' : ''}`}
+                onClick={handleGenerateDesc}
+                disabled={genDescBusy || (!pendingFile && !form.foto_path)}
+                title={(!pendingFile && !form.foto_path) ? 'Sube una foto primero' : (form.descripcion_visual ? 'Regenerar a partir de la foto' : 'Generar a partir de la foto')}
+              >
+                {genDescBusy ? (
+                  <span className="ai-spinner"/>
+                ) : (
+                  I.sparkle({ size: 12 })
+                )}
+                <span>{genDescBusy ? 'Generando…' : (form.descripcion_visual ? 'Regenerar con IA' : 'Generar con IA')}</span>
+              </button>
+            </div>
             <textarea
               className="ftarea"
               rows={3}
@@ -342,6 +419,15 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
         .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
         .frow:has(>*:nth-child(3)){grid-template-columns:1fr 1fr 1fr}
         .section-h{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-top:8px;padding:0 2px}
+        .section-h-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
+        .section-h-row .section-h{margin-top:0}
+
+        .ai-gen-btn{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--accent);background:transparent;border:1px solid var(--accent-soft);cursor:pointer;font-weight:600;padding:5px 11px;border-radius:99px;transition:all .15s;letter-spacing:0;text-transform:none;font-family:inherit;white-space:nowrap}
+        .ai-gen-btn:hover:not(:disabled){background:var(--accent-soft);border-color:var(--accent)}
+        .ai-gen-btn:disabled{opacity:.4;cursor:not-allowed}
+        .ai-gen-btn.subtle{font-size:11px;border-color:transparent;color:var(--muted);font-weight:500}
+        .ai-gen-btn.subtle:hover:not(:disabled){color:var(--accent);border-color:var(--accent-soft)}
+        .ai-spinner{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--accent-soft);border-top-color:var(--accent);animation:spin .7s linear infinite;display:inline-block}
         .tag-row{display:flex;flex-wrap:wrap;gap:5px}
         .tagpill{padding:6px 12px;border-radius:99px;font-size:11.5px;font-weight:500;color:var(--ink-2);background:#fff;border:1px solid var(--line);transition:all .12s}
         .tagpill:hover{border-color:#cdc4b3}
@@ -368,7 +454,7 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   );
 }
 
-function Field({ label, v, onChange, type = 'text', opts, mono, num, placeholder }) {
+function Field({ label, v, onChange, type = 'text', opts, mono, num, placeholder, hint, maxLength }) {
   return (
     <div className="field">
       <label>{label}</label>
@@ -383,14 +469,17 @@ function Field({ label, v, onChange, type = 'text', opts, mono, num, placeholder
           onChange={e => onChange(e.target.value)}
           className={mono ? 'mono-in' : ''}
           placeholder={placeholder}
+          maxLength={maxLength}
         />
       )}
+      {hint && <div className="field-hint">{hint}</div>}
       <style>{`
         .field{display:flex;flex-direction:column;gap:5px;min-width:0}
         .field label{font-size:11px;font-weight:600;color:var(--ink-2);letter-spacing:.2px}
         .field input,.field select{padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:13px;color:var(--ink);font-family:inherit;outline:none;transition:all .15s;width:100%}
         .field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
         .field .mono-in{font-variant-numeric:tabular-nums;letter-spacing:.3px}
+        .field-hint{font-size:10.5px;color:var(--muted);font-style:italic;margin-top:1px;padding:0 2px}
       `}</style>
     </div>
   );

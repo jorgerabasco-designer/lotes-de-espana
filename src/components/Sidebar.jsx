@@ -9,7 +9,7 @@ export default function Sidebar({
   selBrands = [], setSelBrands,
   cats = [],
   allTags = [],
-  logoSrc = '/seed/logo.png',
+  logoSrc = '/logo.png',
 }) {
   const items = [
     { id: 'catalog',  label: 'Catálogo',      icon: 'catalog' },

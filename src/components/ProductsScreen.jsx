@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { I } from './icons.jsx';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
 
-export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
+export default function ProductsScreen({ products, onEdit, onDelete, onNew, onImport }) {
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [confirmDel, setConfirmDel] = useState(null);
@@ -22,7 +22,10 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
           <h1 className="cat-title">Productos</h1>
           <p className="cat-sub">Gestión completa de tu catálogo · {products.length} productos</p>
         </div>
-        <button className="btn btn-primary" onClick={onNew}>{I.plus({ size: 16 })} Nuevo producto</button>
+        <div className="screen-head-r">
+          <button className="btn btn-ghost" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
+          <button className="btn btn-primary" onClick={onNew}>{I.plus({ size: 16 })} Nuevo producto</button>
+        </div>
       </header>
 
       <div className="toolbar">
@@ -60,10 +63,17 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
             <div className="pc-sku mono">{p.sku}</div>
             <div className="pc-cat"><span className="cat-tag">{catLabels[p.cat] || p.cat}</span></div>
             <div className="pc-tags">
-              {(p.tags || []).slice(0, 3).map(t => (
-                <span key={t} className="row-tag">{tagLabels[t] || t}</span>
-              ))}
-              {(p.tags || []).length > 3 && <span className="row-tag more">+{p.tags.length - 3}</span>}
+              {(() => {
+                const validTags = (p.tags || []).filter(t => tagLabels[t]);
+                return (
+                  <>
+                    {validTags.slice(0, 3).map(t => (
+                      <span key={t} className="row-tag">{tagLabels[t]}</span>
+                    ))}
+                    {validTags.length > 3 && <span className="row-tag more">+{validTags.length - 3}</span>}
+                  </>
+                );
+              })()}
             </div>
             <div className="pc-dim mono">{p.h}×{p.w}×{p.d} cm</div>
             <div className="pc-act">
@@ -97,7 +107,8 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew }) {
         .cat-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}
         .cat-title{font-family:'Fraunces',serif;font-weight:400;font-size:46px;line-height:1;letter-spacing:-.02em;color:var(--ink);margin:0}
         .cat-sub{margin:12px 0 0;color:var(--muted);font-size:14px;line-height:1.55}
-        .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:550;transition:all .15s;border:1px solid transparent}
+        .screen-head-r{display:flex;gap:8px;flex-wrap:wrap}
+        .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:550;transition:all .15s;border:1px solid transparent;white-space:nowrap;cursor:pointer;font-family:inherit}
         .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(167,77,74,.3),0 4px 14px -4px rgba(167,77,74,.4)}
         .btn-primary:hover{background:var(--accent-2);transform:translateY(-1px)}
         .btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink)}

@@ -58,73 +58,39 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
       const olive = [47, 74, 61];
       const line = [230, 222, 210];
 
-      // ---- Cabecera con logo + marca ----
-      // Banda superior crudo claro
+      // ---- Cabecera (banda fina sin logo, solo texto identificativo) ----
+      const bandH = 22;
       doc.setFillColor(245, 241, 232);
-      doc.rect(0, 0, pageW, 32, 'F');
+      doc.rect(0, 0, pageW, bandH, 'F');
 
-      // Logo (si carga) — respetando proporción real
-      let logoEndX = margin; // dónde acaba el logo, para colocar el texto después
-      try {
-        const logoRes = await fetch('/favicon.png', { mode: 'cors' });
-        if (logoRes.ok) {
-          const lblob = await logoRes.blob();
-          const ldata = await new Promise((resolve, reject) => {
-            const r = new FileReader();
-            r.onload = () => resolve(r.result);
-            r.onerror = reject;
-            r.readAsDataURL(lblob);
-          });
-          const lbitmap = await createImageBitmap(lblob);
-          const logoMaxH = 16;  // alto máximo del logo en la cabecera (mm)
-          const logoMaxW = 22;  // ancho máximo
-          const lRatio = lbitmap.width / lbitmap.height;
-          let lW, lH;
-          if (lRatio > logoMaxW / logoMaxH) {
-            lW = logoMaxW;
-            lH = logoMaxW / lRatio;
-          } else {
-            lH = logoMaxH;
-            lW = logoMaxH * lRatio;
-          }
-          const lY = (32 - lH) / 2; // vertical-centered en la banda de 32mm
-          doc.addImage(ldata, 'PNG', margin, lY, lW, lH, undefined, 'FAST');
-          logoEndX = margin + lW + 5;
-        }
-      } catch {}
-
-      // Texto cabecera
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(13);
+      doc.setFontSize(11);
       doc.setTextColor(...ink);
-      doc.text('LOTES DE ESPAÑA', margin + 18, 16);
+      doc.text('LOTES DE ESPAÑA', margin, 12);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(...muted);
-      doc.text('Studio · Composición personalizada', margin + 18, 21);
+      doc.text('Studio · Composición personalizada', margin, 17);
 
-      // Fecha alineada a la derecha en la banda
       const dateStr = bodegon.created_at
         ? new Date(bodegon.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })
         : new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setTextColor(...muted);
-      doc.text(dateStr.toUpperCase(), pageW - margin, 16, { align: 'right' });
-      doc.setFontSize(9);
+      doc.text(dateStr.toUpperCase(), pageW - margin, 12, { align: 'right' });
+      doc.setFontSize(8.5);
       doc.setTextColor(...ink2);
-      doc.text(`${(bodegon.skus || []).length} productos`, pageW - margin, 21, { align: 'right' });
+      doc.text(`${(bodegon.skus || []).length} productos`, pageW - margin, 17, { align: 'right' });
 
       // Línea separadora bajo cabecera
       doc.setDrawColor(...line);
       doc.setLineWidth(0.3);
-      doc.line(margin, 32, pageW - margin, 32);
+      doc.line(margin, bandH, pageW - margin, bandH);
 
-      // ---- Título del bodegón (serif Times) ----
-      // El texto se posiciona por baseline en jsPDF. Para que la primera línea
-      // del título empiece justo bajo la banda con respiro, baseline = top + cap.
+      // ---- Título del bodegón (sin logo, pendiente de SVG en alta resolución) ----
       const titleSize = 28; // pt
-      const titleLineH = 11; // mm — line-height generoso para 28pt
-      let cursorY = 32 + 14 + (titleSize * 0.353);
+      const titleLineH = 11; // mm
+      let cursorY = bandH + 18 + (titleSize * 0.353);
       doc.setFont('times', 'normal');
       doc.setFontSize(titleSize);
       doc.setTextColor(...ink);
@@ -189,9 +155,9 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
       //   2mm      |   resto del ancho        |
       const bulletX = margin + 1.4;
       const textX = margin + 6;
-      const rowH = 11;       // alto reservado por fila
-      const nameBaseline = 4.2; // mm desde el top de la fila al baseline del nombre
-      const brandBaseline = 8.6; // mm desde el top de la fila al baseline de marca
+      const rowH = 15;       // alto reservado por fila (más aire entre productos)
+      const nameBaseline = 5;   // mm desde el top de la fila al baseline del nombre
+      const brandBaseline = 9.6; // mm desde el top de la fila al baseline de marca
 
       for (const sku of skuList) {
         const p = (products || []).find(x => x.sku === sku);
