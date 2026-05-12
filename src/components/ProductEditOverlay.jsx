@@ -129,7 +129,7 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
         <header className="ov-head">
           <div>
             <div className="ov-eyebrow">{isNew ? 'Nuevo' : 'Editar'} producto</div>
-            <h3 className="ov-title">{isNew ? 'Subir producto' : form.name}</h3>
+            <h3 className="ov-title">{isNew ? 'Nuevo producto' : form.name}</h3>
           </div>
           <button className="ov-x" onClick={onClose}>{I.x({ size: 18 })}</button>
         </header>

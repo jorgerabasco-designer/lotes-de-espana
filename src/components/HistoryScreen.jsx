@@ -54,6 +54,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
   const [dlBodegon, setDlBodegon] = useState(null);
   const [clearing, setClearing] = useState(false);
   const [zoomedSrc, setZoomedSrc] = useState(null);
+  const [editingLightboxTitle, setEditingLightboxTitle] = useState(false);
 
   const handleClearAll = async () => {
     if (!confirm('Esto eliminará TODOS los bodegones del historial (también sus imágenes). Esta acción no se puede deshacer. ¿Continuar?')) return;
@@ -257,7 +258,34 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
             </div>
             <div className="lb-side">
               <div className="lb-eye">Bodegón generado</div>
-              <div className="lb-title">{lightbox.title}</div>
+              {editingLightboxTitle ? (
+                <input
+                  autoFocus
+                  className="lb-title-input"
+                  defaultValue={lightbox.title}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim() || lightbox.title;
+                    if (v !== lightbox.title && onRename) {
+                      onRename(lightbox.id, v);
+                      setLightbox({ ...lightbox, title: v });
+                    }
+                    setEditingLightboxTitle(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.target.blur();
+                    if (e.key === 'Escape') setEditingLightboxTitle(false);
+                  }}
+                />
+              ) : (
+                <div
+                  className="lb-title editable"
+                  onClick={() => setEditingLightboxTitle(true)}
+                  title="Click para renombrar"
+                >
+                  {lightbox.title}
+                  <span className="lb-title-edit">{I.edit({ size: 14 })}</span>
+                </div>
+              )}
               <div className="lb-date">{lightbox.date}</div>
               {lightbox.description && <div className="lb-desc">{lightbox.description}</div>}
               <div className="lb-section-h">Productos ({(lightbox.skus || []).length})</div>
@@ -366,7 +394,12 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         .lb-stage .hthumb-comp img{position:relative;max-width:24%;height:auto}
         .lb-side{padding:36px 30px 24px;display:flex;flex-direction:column;background:var(--paper);overflow-y:auto}
         .lb-eye{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:6px}
-        .lb-title{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.01em;line-height:1.15}
+        .lb-title{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.01em;line-height:1.15;display:inline-flex;align-items:center;gap:8px;border-radius:7px;padding:2px 6px;margin-left:-6px}
+        .lb-title.editable{cursor:text}
+        .lb-title.editable:hover{background:rgba(45,42,38,.04)}
+        .lb-title.editable:hover .lb-title-edit{opacity:.5}
+        .lb-title-edit{opacity:0;color:var(--muted);transition:opacity .15s;display:inline-grid;place-items:center}
+        .lb-title-input{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.01em;background:#fff;border:1.5px solid var(--accent);border-radius:7px;padding:3px 8px;margin-left:-8px;width:calc(100% + 8px);outline:none;box-shadow:0 0 0 4px var(--accent-soft)}
         .lb-date{font-size:12.5px;color:var(--muted);margin-top:4px}
         .lb-desc{font-size:13px;color:var(--ink-2);margin-top:10px;line-height:1.55}
         .lb-section-h{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:24px 0 10px}

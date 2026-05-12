@@ -43,11 +43,124 @@ input,select,textarea{font-family:inherit;color:inherit}
 @keyframes popIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes sortIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 
-/* ----- Responsive: el cliente lo usará en desktop, pero mantenemos un fallback usable. ----- */
-@media (max-width: 1100px){
-  .app{flex-direction:column}
-  .sidebar{position:relative !important;width:100% !important;flex:0 0 auto !important;height:auto !important;border-right:none !important;border-bottom:1px solid var(--line)}
+/* ============================================================
+   RESPONSIVE
+   - >= 900px: desktop, sidebar fijo a la izquierda
+   - < 900px: tablet/móvil, sidebar arriba (compacto, scroll horizontal)
+   - < 600px: móvil estrecho, tipografía y paddings reducidos
+   ============================================================ */
+
+@media (max-width: 900px){
+  .app{flex-direction:column;align-items:stretch}
+
+  /* Sidebar como barra superior */
+  .sidebar{
+    position:sticky !important;top:0;
+    width:100% !important;flex:0 0 auto !important;
+    height:auto !important;
+    flex-direction:row !important;
+    padding:10px 14px !important;
+    border-right:none !important;
+    border-bottom:1px solid var(--line);
+    gap:10px;
+    z-index:50;
+    background:#FAFAF7;
+  }
+  .sidebar .brand{padding:0 !important;margin:0 !important;flex:0 0 auto}
+  .sidebar .brand-text{display:none}
+  .sidebar .nav{flex-direction:row !important;flex:1;justify-content:center;padding:0 !important;gap:4px !important;overflow-x:auto}
+  .sidebar .nav-item{padding:8px 10px !important;font-size:12.5px !important}
+  .sidebar .nav-text{display:none}
+  .sidebar .nav-item.on .nav-text,
+  .sidebar .nav-icon{display:inline-grid}
+  .sidebar .filters{display:none !important}
+  .sidebar .sb-foot{padding:0 !important;border-top:none !important;flex:0 0 auto}
+  .sidebar .user-meta{display:none}
+
+  /* Preview lateral (legado) */
   .pv{position:relative !important;width:100% !important;flex:0 0 auto !important;height:auto !important;border-left:none !important;border-top:1px solid var(--line)}
-  .catalog,.screen{padding:24px 18px 32px !important;height:auto !important}
-  .cat-title{font-size:34px !important}
+
+  /* Pantallas principales */
+  .catalog,.screen{padding:20px 16px 28px !important;height:auto !important;width:100%}
+  .cat-title{font-size:30px !important}
+  .cat-head{align-items:flex-start !important;gap:14px !important}
+  .cat-sub{font-size:13px !important}
+
+  /* Grid: forzar 2 columnas como mínimo legible */
+  .catalog .grid,
+  .hist-screen .hgrid{grid-template-columns:repeat(2,1fr) !important;gap:12px !important}
+
+  /* Toolbar más pegado */
+  .toolbar{gap:6px !important}
+  .toolbar .density,
+  .toolbar .sort-wrap{flex-shrink:0}
+
+  /* Settings: nav arriba como pills */
+  .set-layout{grid-template-columns:1fr !important;gap:20px !important}
+  .set-nav{position:relative !important;flex-direction:row !important;flex-wrap:wrap;gap:6px !important}
+  .set-navitem{padding:8px 12px !important;border-radius:99px !important;background:#fff !important;border:1px solid var(--line)}
+  .set-navitem.on{background:var(--ink) !important;border-color:var(--ink)}
+  .set-navitem.on .set-navlabel{color:#fff !important}
+  .set-navindicator{display:none}
+  .set-navdesc{display:none}
+
+  /* Tabla productos: convertir filas en tarjetas */
+  .ptable{border:none !important;background:transparent !important}
+  .prow.phead{display:none !important}
+  .prow{
+    grid-template-columns:60px 1fr 40px !important;
+    background:#fff;
+    border:1px solid var(--line) !important;
+    border-radius:12px;
+    margin-bottom:8px;
+    padding:12px !important;
+    gap:10px !important;
+  }
+  .pc-sku, .pc-cat, .pc-dim, .pc-tags{
+    grid-column:1 / -1;
+    padding-left:70px;
+    font-size:11.5px !important;
+    color:var(--muted);
+  }
+  .pc-sku::before{content:"Ref. "}
+  .pc-dim::before{content:""}
+
+  /* Bodegón overlay: stack vertical en móvil */
+  .bo-modal{grid-template-columns:1fr !important}
+  .bo-stage-wrap{min-height:300px !important;padding:24px !important;border-right:none !important;border-bottom:1px solid var(--line)}
+  .bo-side{padding:24px 20px !important;max-height:none !important}
+
+  /* Lightbox del historial: stack vertical */
+  .lb-modal{grid-template-columns:1fr !important}
+  .lb-stage{min-height:280px !important;border-right:none !important;border-bottom:1px solid var(--line)}
+  .lb-side{padding:24px 20px !important}
+
+  /* Modal de subir producto */
+  .ov-body{grid-template-columns:1fr !important;padding:18px 22px !important}
+  .ov-head{padding:18px 22px !important}
+  .ov-title{font-size:20px !important}
+
+  /* Modal de descarga */
+  .dl{padding:18px !important}
+}
+
+@media (max-width: 600px){
+  .cat-title{font-size:26px !important}
+  .cat-head-r{flex-wrap:wrap}
+  .cat-head-r .btn{flex:1;justify-content:center}
+
+  .toolbar{flex-wrap:wrap !important}
+  .toolbar .search{width:100%;order:-1}
+
+  /* En el móvil más pequeño: 1 columna */
+  .catalog .grid,
+  .hist-screen .hgrid{grid-template-columns:1fr !important}
+
+  /* Selbar más compacto */
+  .selbar{padding:10px 12px !important}
+  .selbar-r .btn-create{padding:7px 12px !important;font-size:12px !important}
+
+  /* Bodegón loading text */
+  .bo-loading-text{font-size:16px !important}
+  .bo-loading-sub{font-size:11.5px !important;padding:0 20px}
 }

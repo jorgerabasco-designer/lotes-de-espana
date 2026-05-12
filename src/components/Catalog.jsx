@@ -52,7 +52,7 @@ export default function Catalog({
         </div>
         <div className="cat-head-r">
           <button className="btn btn-ghost" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
-          <button className="btn btn-primary" onClick={onCreateProduct}>{I.upload({ size: 16 })} Subir producto</button>
+          <button className="btn btn-primary" onClick={onCreateProduct}>{I.plus({ size: 16 })} Nuevo producto</button>
         </div>
       </header>
 
@@ -285,7 +285,7 @@ function UploadCard({ onClick }) {
       onDrop={onDrop}
     >
       <div className="upcard-icon">{I.plus({ size: 24 })}</div>
-      <div className="upcard-text">Subir producto</div>
+      <div className="upcard-text">Nuevo producto</div>
       <div className="upcard-sub">Arrastra una imagen o haz clic</div>
       <style>{`
         .upcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1.5px dashed var(--line);border-radius:18px;background:transparent;color:var(--muted);min-height:340px;padding:14px;transition:all .15s}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
 import { DEFAULT_PROMPT_TEMPLATE } from '../lib/constants.js';
-import { getSetting, setSetting, diagnoseSupabase } from '../lib/api.js';
+import { getSetting, setSetting, diagnoseSupabase, upsertProduct } from '../lib/api.js';
 import { SUPABASE_READY } from '../lib/supabase.js';
 import { importSeedProducts, SEED_PRODUCTS } from '../lib/seed.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
@@ -159,7 +159,15 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
                 count={catCount}
                 onAdd={tax.addCategory}
                 onUpdate={tax.updateCategory}
-                onRemove={tax.removeCategory}
+                onRemove={async (id) => {
+                  await tax.removeCategory(id);
+                  // Marcar productos sin categoría como 'otros'
+                  const affected = products.filter(p => p.cat === id);
+                  for (const p of affected) {
+                    try { await upsertProduct({ ...p, cat: 'otros' }); } catch (e) { console.warn(e); }
+                  }
+                  onProductsChanged && (await onProductsChanged());
+                }}
                 placeholder="Nueva categoría — p. ej. Embutidos"
                 pillStyle={false}
               />
@@ -173,7 +181,17 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
                 count={tagCount}
                 onAdd={tax.addTag}
                 onUpdate={tax.updateTag}
-                onRemove={tax.removeTag}
+                onRemove={async (id) => {
+                  await tax.removeTag(id);
+                  // Quitar la etiqueta de todos los productos que la tenían
+                  const affected = products.filter(p => (p.tags || []).includes(id));
+                  for (const p of affected) {
+                    try {
+                      await upsertProduct({ ...p, tags: (p.tags || []).filter(t => t !== id) });
+                    } catch (e) { console.warn(e); }
+                  }
+                  onProductsChanged && (await onProductsChanged());
+                }}
                 placeholder="Nueva etiqueta — p. ej. Artesano"
                 pillStyle={true}
               />

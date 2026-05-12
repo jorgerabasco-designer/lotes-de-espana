@@ -63,9 +63,10 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
       doc.setFillColor(245, 241, 232);
       doc.rect(0, 0, pageW, 32, 'F');
 
-      // Logo (si carga)
+      // Logo (si carga) — respetando proporción real
+      let logoEndX = margin; // dónde acaba el logo, para colocar el texto después
       try {
-        const logoRes = await fetch('/seed/logo.png', { mode: 'cors' });
+        const logoRes = await fetch('/favicon.png', { mode: 'cors' });
         if (logoRes.ok) {
           const lblob = await logoRes.blob();
           const ldata = await new Promise((resolve, reject) => {
@@ -74,7 +75,21 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
             r.onerror = reject;
             r.readAsDataURL(lblob);
           });
-          doc.addImage(ldata, 'PNG', margin, 9, 14, 14, undefined, 'FAST');
+          const lbitmap = await createImageBitmap(lblob);
+          const logoMaxH = 16;  // alto máximo del logo en la cabecera (mm)
+          const logoMaxW = 22;  // ancho máximo
+          const lRatio = lbitmap.width / lbitmap.height;
+          let lW, lH;
+          if (lRatio > logoMaxW / logoMaxH) {
+            lW = logoMaxW;
+            lH = logoMaxW / lRatio;
+          } else {
+            lH = logoMaxH;
+            lW = logoMaxH * lRatio;
+          }
+          const lY = (32 - lH) / 2; // vertical-centered en la banda de 32mm
+          doc.addImage(ldata, 'PNG', margin, lY, lW, lH, undefined, 'FAST');
+          logoEndX = margin + lW + 5;
         }
       } catch {}
 
