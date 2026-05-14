@@ -18,6 +18,7 @@ const DensityIcon = ({ n }) => {
 
 export default function Catalog({
   products, selected, onToggle,
+  qtys = {}, onAddUnit, onRemoveUnit,
   query, setQuery, sort, setSort,
   cat, setCat, tags, setTags,
   selBrands = [], setSelBrands,
@@ -30,6 +31,7 @@ export default function Catalog({
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const activeFilters = (cat !== 'all' ? 1 : 0) + tags.length + selBrands.length;
+  const totalUnits = selected.reduce((sum, sku) => sum + (qtys[sku] || 1), 0);
   const toggleTag = (id) => setTags(tags.includes(id) ? tags.filter(x => x !== id) : [...tags, id]);
   const toggleBrand = (b) => setSelBrands(selBrands.includes(b) ? selBrands.filter(x => x !== b) : [...selBrands, b]);
 
@@ -163,7 +165,10 @@ export default function Catalog({
         <div className="selbar">
           <div className="selbar-l">
             <span className="selbar-num">{selected.length}</span>
-            <span>productos seleccionados</span>
+            <span>
+              {selected.length === 1 ? 'producto seleccionado' : 'productos seleccionados'}
+              {totalUnits > selected.length && ` · ${totalUnits} unidades`}
+            </span>
           </div>
           <div className="selbar-r">
             <button className="link" onClick={onClearSel}>Limpiar</button>
@@ -174,7 +179,14 @@ export default function Catalog({
 
       <div className="grid" style={{ gridTemplateColumns: `repeat(${cols},1fr)` }}>
         {sorted.map(p => (
-          <ProductCard key={p.sku} p={p} sel={selected.includes(p.sku)} selIdx={selected.indexOf(p.sku) + 1} onToggle={() => onToggle(p.sku)} dense={cols >= 6} />
+          <ProductCard
+            key={p.sku}
+            p={p}
+            sel={selected.includes(p.sku)}
+            qty={qtys[p.sku] || 0}
+            onAdd={() => onAddUnit(p.sku)}
+            onRemove={() => onRemoveUnit(p.sku)}
+          />
         ))}
         <UploadCard onClick={onCreateProduct} />
       </div>
@@ -256,17 +268,26 @@ export default function Catalog({
   );
 }
 
-function ProductCard({ p, sel, selIdx = 0, onToggle }) {
+function ProductCard({ p, sel, qty = 0, onAdd, onRemove }) {
   const { catLabels, tagLabels } = useTaxonomy();
   const catLabel = catLabels[p.cat] || p.cat;
   const noPhoto = !p.img;
+  const [bump, setBump] = React.useState(false);
+
   const handleClick = () => {
     if (noPhoto) {
       alert(`"${p.name}" no tiene foto. Edita el producto y sube una imagen para poder incluirlo en un bodegón.`);
       return;
     }
-    onToggle();
+    onAdd();
+    setBump(true);
+    setTimeout(() => setBump(false), 320);
   };
+  const handleRemove = (e) => {
+    e.stopPropagation();
+    onRemove();
+  };
+
   return (
     <button
       type="button"
@@ -283,14 +304,25 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
         {p.img ? <img src={p.img} alt={p.name} draggable={false}/> : <div className="pcard-noimg">{I.upload({ size: 22 })}<div>Falta foto</div></div>}
         <div className="pcard-veil" aria-hidden></div>
         {!noPhoto && (
-          <div className="pcard-badge" aria-hidden>
-            <span className="pcard-badge-num">{selIdx > 0 ? selIdx : ''}</span>
-            <span className="pcard-badge-check">{I.check({ size: 14 })}</span>
+          <div className={`pcard-badge ${qty >= 2 ? 'multi' : ''} ${bump ? 'bump' : ''}`} aria-hidden>
+            {qty >= 2
+              ? <span className="pcard-badge-qty">×{qty}</span>
+              : <span className="pcard-badge-check">{I.check({ size: 14 })}</span>}
           </div>
+        )}
+        {/* Control para restar unidades — solo visible cuando el producto está seleccionado */}
+        {!noPhoto && sel && (
+          <button
+            type="button"
+            className="pcard-minus"
+            onClick={handleRemove}
+            aria-label="Quitar una unidad"
+            title={qty >= 2 ? 'Quitar una unidad' : 'Quitar del bodegón'}
+          >−</button>
         )}
         {!noPhoto && (
           <div className="pcard-tap" aria-hidden>
-            <span>{sel ? 'Quitar' : 'Añadir'}</span>
+            <span>{sel ? '+ unidad' : 'Añadir'}</span>
           </div>
         )}
       </div>
@@ -337,18 +369,26 @@ function ProductCard({ p, sel, selIdx = 0, onToggle }) {
         .pcard-veil{position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(167,77,74,.08) 100%);opacity:0;transition:opacity .25s;pointer-events:none}
         .pcard.sel .pcard-veil{opacity:1}
 
-        .pcard-badge{position:absolute;top:10px;right:10px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#fff;border:1.5px solid var(--line);color:var(--muted);transition:all .25s cubic-bezier(.2,.8,.2,1);transform:scale(.85);font-family:'Fraunces',serif;font-weight:600;font-size:13px;font-variant-numeric:tabular-nums;overflow:hidden}
+        .pcard-badge{position:absolute;top:10px;right:10px;min-width:28px;height:28px;padding:0 6px;border-radius:99px;display:grid;place-items:center;background:#fff;border:1.5px solid var(--line);color:var(--muted);transition:all .25s cubic-bezier(.2,.8,.2,1);transform:scale(.85);font-family:'Fraunces',serif;font-weight:600;font-size:13px;font-variant-numeric:tabular-nums;overflow:hidden}
         .pcard:hover .pcard-badge{border-color:var(--ink-2);transform:scale(1)}
         .pcard.sel .pcard-badge{background:var(--accent);border-color:var(--accent);color:#fff;transform:scale(1);box-shadow:0 4px 12px rgba(167,77,74,.35)}
-        .pcard-badge-num{display:none}
-        .pcard.sel .pcard-badge-num{display:inline}
         .pcard-badge-check{display:grid;place-items:center;color:inherit}
-        .pcard.sel .pcard-badge-check{display:none}
+        .pcard-badge.multi{background:var(--accent);border-color:var(--accent);color:#fff;font-size:13px;letter-spacing:.2px}
+        .pcard-badge.bump{animation:badgeBump .32s cubic-bezier(.2,1.6,.4,1)}
+        @keyframes badgeBump{0%{transform:scale(1)}40%{transform:scale(1.32)}100%{transform:scale(1)}}
+        .pcard-badge-qty{display:inline-block}
+
+        /* Botón "−" para restar unidades, esquina inferior derecha de la imagen */
+        .pcard-minus{position:absolute;bottom:10px;right:10px;width:26px;height:26px;border-radius:50%;background:#fff;border:1.5px solid var(--line);color:var(--ink-2);display:grid;place-items:center;font-size:18px;font-weight:600;line-height:1;cursor:pointer;transition:all .15s;box-shadow:0 2px 8px rgba(45,42,38,.12);padding:0;z-index:3}
+        .pcard-minus:hover{background:var(--accent);border-color:var(--accent);color:#fff;transform:scale(1.1)}
 
         .pcard-tap{position:absolute;left:50%;bottom:14px;transform:translate(-50%,8px);background:var(--ink);color:var(--paper);font-size:11px;font-weight:600;letter-spacing:.04em;padding:6px 14px;border-radius:99px;opacity:0;transition:all .2s;pointer-events:none;white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.18)}
         .pcard:hover .pcard-tap{opacity:1;transform:translate(-50%,0)}
         .pcard.sel .pcard-tap{background:var(--accent)}
         .pcard.sel:hover .pcard-tap{opacity:1}
+        /* En cards seleccionadas, el "+ unidad" se mueve a la izquierda para no chocar con el botón "−" */
+        .pcard.sel .pcard-tap{left:auto;right:46px;transform:translate(0,8px)}
+        .pcard.sel:hover .pcard-tap{transform:translate(0,0)}
         .pname{font-size:14.5px;font-weight:600;color:var(--ink);line-height:1.3;letter-spacing:-.005em;font-family:'Fraunces',serif}
         .pmeta{font-size:11.5px;color:var(--muted);margin-top:5px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
         .pmeta-l{display:flex;align-items:center;gap:6px;min-width:0}

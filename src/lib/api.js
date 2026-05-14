@@ -156,13 +156,26 @@ export async function uploadProductPhoto(file, sku) {
 }
 
 // ---------- BODEGONES ----------
+// Normaliza el campo `productos`: acepta el formato viejo ['sku1','sku2']
+// y el nuevo [{sku,qty}]. Devuelve siempre [{sku, qty}].
+function normalizeProductos(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(it => {
+    if (typeof it === 'string') return { sku: it, qty: 1 };
+    if (it && typeof it === 'object' && it.sku) return { sku: it.sku, qty: Number(it.qty) || 1 };
+    return null;
+  }).filter(Boolean);
+}
+
 function rowToBodegon(row) {
+  const items = normalizeProductos(row.productos);
   return {
     id: row.ref,
     n: row.numero,
     title: row.nombre || `Bodegón IA #${row.numero}`,
     description: row.descripcion || '',
-    skus: row.productos || [],
+    items,                            // [{sku, qty}]
+    skus: items.map(it => it.sku),    // ['sku1','sku2'] — compat con HistoryScreen
     image: row.imagen_path
       ? publicUrl('bodegones', row.imagen_path)
       : null,
@@ -389,9 +402,18 @@ async function nextBodegonNumber() {
   return (data?.[0]?.numero || 0) + 1;
 }
 
-export async function startBodegonGeneration({ skus, title, description }) {
+// items: [{ sku, qty }]. Se acepta también `skus` (array de strings) por
+// compatibilidad — se convierte a qty 1 cada uno.
+export async function startBodegonGeneration({ items, skus, title, description }) {
   if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
-  if (!Array.isArray(skus) || skus.length === 0) throw new Error('Selecciona al menos un producto.');
+
+  let normItems = [];
+  if (Array.isArray(items) && items.length) {
+    normItems = items.map(it => ({ sku: it.sku, qty: Number(it.qty) || 1 }));
+  } else if (Array.isArray(skus) && skus.length) {
+    normItems = skus.map(s => ({ sku: s, qty: 1 }));
+  }
+  if (normItems.length === 0) throw new Error('Selecciona al menos un producto.');
 
   const ref = newBodegonRef();
   const numero = await nextBodegonNumber();
@@ -402,7 +424,7 @@ export async function startBodegonGeneration({ skus, title, description }) {
     numero,
     nombre: finalTitle,
     descripcion: description || null,
-    productos: skus,
+    productos: normItems,            // [{sku, qty}]
     estado: 'generating',
   });
   if (insErr) throw new Error('No se pudo registrar el bodegón: ' + insErr.message);
@@ -415,7 +437,7 @@ export async function startBodegonGeneration({ skus, title, description }) {
     body: JSON.stringify({ ref }),
   }).catch(e => console.warn('Trigger background:', e));
 
-  return { id: ref, n: numero, title: finalTitle, description, skus };
+  return { id: ref, n: numero, title: finalTitle, description, items: normItems, skus: normItems.map(i => i.sku) };
 }
 
 export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 5 * 60 * 1000, onTick } = {}) {

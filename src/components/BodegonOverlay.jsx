@@ -4,7 +4,7 @@ import { startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon } fr
 import DownloadModal from './DownloadModal.jsx';
 
 export default function BodegonOverlay({
-  open, onClose, products, selected,
+  open, onClose, products, selected, qtys = {},
   title, setTitle, description, setDescription,
   onSaved, onDeleted,
 }) {
@@ -20,6 +20,10 @@ export default function BodegonOverlay({
   const sel = selected.map(s => products.find(p => p.sku === s)).filter(Boolean);
   const sorted = [...sel].sort((a, b) => b.h - a.h);
   const maxH = Math.max(...sel.map(p => p.h), 30);
+  const qtyOf = (sku) => qtys[sku] || 1;
+  const totalUnits = sel.reduce((sum, p) => sum + qtyOf(p.sku), 0);
+  // Items con cantidad para mandar a la generación
+  const itemsWithQty = selected.map(sku => ({ sku, qty: qtyOf(sku) }));
 
   const runGeneration = async () => {
     setError(null);
@@ -30,7 +34,7 @@ export default function BodegonOverlay({
     const tick = setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
     try {
       const created = await startBodegonGeneration({
-        skus: selected,
+        items: itemsWithQty,
         title,
         description: description || '',
       });
@@ -190,7 +194,11 @@ export default function BodegonOverlay({
               <span className="bo-title-edit">{I.edit({ size: 14 })}</span>
             </h2>
           )}
-          <div className="bo-meta">{sel.length} productos · {new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+          <div className="bo-meta">
+            {sel.length} {sel.length === 1 ? 'producto' : 'productos'}
+            {totalUnits > sel.length && ` · ${totalUnits} unidades`}
+            {' · '}{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
+          </div>
 
           <div className="bo-section-h">Descripción</div>
           <textarea
@@ -210,6 +218,7 @@ export default function BodegonOverlay({
                   <div className="bo-prod-n">{p.name}</div>
                   <div className="bo-prod-m">{p.brand}</div>
                 </div>
+                {qtyOf(p.sku) >= 2 && <div className="bo-prod-qty">×{qtyOf(p.sku)}</div>}
               </div>
             ))}
           </div>
@@ -320,6 +329,7 @@ export default function BodegonOverlay({
         .bo-prod-info{min-width:0;flex:1}
         .bo-prod-n{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .bo-prod-m{font-size:11px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+        .bo-prod-qty{flex-shrink:0;font-family:'Fraunces',serif;font-weight:600;font-size:13px;color:#fff;background:var(--accent);min-width:30px;height:24px;padding:0 8px;border-radius:99px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
 
         .bo-actions{display:flex;flex-direction:column;gap:6px;padding-top:18px;border-top:1px solid var(--line);margin-top:18px}
         .bo-actions-row{display:flex;gap:6px}

@@ -69,8 +69,30 @@ export default function App() {
   }, [products, taxonomy.categories]);
   const allTags = taxonomy.tags;
 
-  const toggle = (sku) => setSelected(s => s.includes(sku) ? s.filter(x => x !== sku) : [...s, sku]);
-  const clearSel = () => setSelected([]);
+  // Cantidades por producto seleccionado: { sku: nº de unidades }
+  const [qtys, setQtys] = useState({});
+
+  // Click en una card: añade 1 unidad (o la primera, si no estaba seleccionado)
+  const addUnit = (sku) => {
+    setSelected(s => s.includes(sku) ? s : [...s, sku]);
+    setQtys(q => ({ ...q, [sku]: (q[sku] || 0) + 1 }));
+  };
+  // Resta 1 unidad; si llega a 0, deselecciona el producto
+  const removeUnit = (sku) => {
+    setQtys(q => {
+      const next = (q[sku] || 0) - 1;
+      const copy = { ...q };
+      if (next <= 0) {
+        delete copy[sku];
+        setSelected(s => s.filter(x => x !== sku));
+      } else {
+        copy[sku] = next;
+      }
+      return copy;
+    });
+  };
+  const toggle = (sku) => addUnit(sku); // compat: el click sigue "añadiendo"
+  const clearSel = () => { setSelected([]); setQtys({}); };
 
   const handleCreate = () => {
     if (selected.length < 2) {
@@ -211,6 +233,7 @@ export default function App() {
       {!loading && active === 'catalog' && (
         <Catalog
           products={products} selected={selected} onToggle={toggle}
+          qtys={qtys} onAddUnit={addUnit} onRemoveUnit={removeUnit}
           query={query} setQuery={setQuery}
           sort={sort} setSort={setSort}
           cat={cat} setCat={setCat}
@@ -266,6 +289,7 @@ export default function App() {
         onClose={() => setBodegonOpen(false)}
         products={products}
         selected={selected}
+        qtys={qtys}
         title={bodegonTitle} setTitle={setBodegonTitle}
         description={bodegonDesc} setDescription={setBodegonDesc}
         onSaved={handleSavedBodegon}

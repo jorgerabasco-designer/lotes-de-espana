@@ -86,9 +86,27 @@ OUTPUT QUALITY
 Photorealistic, e-commerce catalog quality. Color-accurate, true-to-life packaging colors. Clean, retouched look. Premium Spanish delicatessen catalog aesthetic. Highest available resolution.
 
 NEGATIVE — must NOT appear
-No text overlays, captions, logos or watermarks added by the generator. No people, no hands, no body parts. No props (no leaves, flowers, ribbons, baskets, trays, fabric, wood textures, marble, kitchen items). No Christmas / holiday decorations. No invented or modified product labels, no fictional brands. No duplicated products (each reference appears exactly once). No reflections of windows, no studio equipment visible. No motion blur, no film grain, no vintage filter. No coloured background, no grey background, no gradient, no vignette — STRICTLY PURE WHITE. No long cast shadows on the background. No decorative sparkles or graphic embellishments.
+No text overlays, captions, logos or watermarks added by the generator. No people, no hands, no body parts. No props (no leaves, flowers, ribbons, baskets, trays, fabric, wood textures, marble, kitchen items). No Christmas / holiday decorations. No invented or modified product labels, no fictional brands. Do NOT add extra duplicate copies of any product beyond its stated QUANTITY. No reflections of windows, no studio equipment visible. No motion blur, no film grain, no vintage filter. No coloured background, no grey background, no gradient, no vignette — STRICTLY PURE WHITE. No long cast shadows on the background. No decorative sparkles or graphic embellishments.
 
-The final image must contain EXACTLY {N} products, one of each reference listed above. No more, no less.`;
+The final image must contain EXACTLY {N} product units in total, matching the QUANTITY specified for each product above.`;
+
+// Reglas de cantidad — se concatenan SIEMPRE al prompt final, venga el
+// template de Supabase o del DEFAULT. Garantiza que el modelo respete las
+// unidades aunque el prompt configurado por el usuario no las mencione.
+const QUANTITY_RULES = `
+================================================================
+UNIT COUNT — STRICT, NON-NEGOTIABLE
+================================================================
+Each product in the list has a "QUANTITY" field. You MUST include
+each product EXACTLY the number of units stated in its QUANTITY —
+no more, no less.
+- QUANTITY 1 (the usual case): show ONE single unit of that product.
+  NEVER add a second copy of a QUANTITY-1 product.
+- QUANTITY 2 or more: show exactly that many identical copies of the
+  SAME product, grouped together side by side.
+The whole composition must contain EXACTLY {N} product units in total.
+Count them before finishing. Wrong unit counts are the most common
+and most serious error — do not make it.`;
 
 function placeFor(product) {
   // Si el producto trae posición explícita, respetarla. Si no, derivarla por altura.
@@ -112,12 +130,18 @@ function placeInstruction(product) {
   return { zoneEng: 'FRONT', instr: 'standing upright, perfectly vertical, no tilt' };
 }
 
+// Recibe productos con `_qty` ya asignado. Devuelve { block, totalUnits, sorted }.
+// `sorted` se usa para cargar las imágenes de referencia EN EL MISMO ORDEN que
+// el bloque de texto (para que PRODUCT #N — REFERENCE IMAGE #N case bien).
 function buildProductsBlock(products) {
   const order = { TRASERA: 0, MEDIA: 1, DELANTERA: 2 };
   const sorted = [...products].sort((a, b) => order[placeFor(a)] - order[placeFor(b)]);
 
-  return sorted.map((p, idx) => {
+  let totalUnits = 0;
+  const block = sorted.map((p, idx) => {
     const { zoneEng, instr } = placeInstruction(p);
+    const qty = Number(p._qty) || 1;
+    totalUnits += qty;
     const lines = [];
 
     lines.push(`PRODUCT #${idx + 1} — REFERENCE IMAGE #${idx + 1}`);
@@ -127,11 +151,14 @@ function buildProductsBlock(products) {
     if (p.descripcion_visual) lines.push(`  Visual description: ${p.descripcion_visual}`);
     if (Array.isArray(p.tags) && p.tags.length) lines.push(`  Attributes: ${p.tags.join(', ')}`);
     lines.push(`  Real physical size: ${p.alto} × ${p.ancho} × ${p.fondo} cm`);
+    lines.push(`  QUANTITY: include EXACTLY ${qty} ${qty === 1 ? 'unit' : 'identical units'} of this product in the composition${qty > 1 ? ', placed next to each other as a small group' : ''}`);
     lines.push(`  Position: ${zoneEng} tier — ${instr}`);
     if (p.notas) lines.push(`  Notes: ${p.notas}`);
 
     return lines.join('\n');
   }).join('\n\n');
+
+  return { block, totalUnits, sorted };
 }
 
 async function fetchAsBase64(url) {
@@ -176,14 +203,23 @@ export const handler = async (event) => {
   if (bErr || !bod) {
     return json(404, { error: 'Bodegón no encontrado: ' + (bErr?.message || 'sin datos') });
   }
-  const skus = bod.productos || [];
   const finalTitle = bod.nombre;
   const description = bod.descripcion;
 
-  if (!Array.isArray(skus) || skus.length === 0) {
+  // Normalizar `productos`: acepta [{sku,qty}] (nuevo) o ['sku'] (viejo).
+  const rawProductos = Array.isArray(bod.productos) ? bod.productos : [];
+  const items = rawProductos.map(it => {
+    if (typeof it === 'string') return { sku: it, qty: 1 };
+    if (it && it.sku) return { sku: it.sku, qty: Number(it.qty) || 1 };
+    return null;
+  }).filter(Boolean);
+
+  if (items.length === 0) {
     await markFailed(supabase, ref, 'Bodegón sin productos.');
     return json(400, { error: 'Bodegón sin productos.' });
   }
+  const skus = items.map(it => it.sku);
+  const qtyBySku = Object.fromEntries(items.map(it => [it.sku, it.qty]));
 
   // 2) Cargar productos seleccionados
   const { data: rows, error: pErr } = await supabase
@@ -199,6 +235,16 @@ export const handler = async (event) => {
     return json(404, { error: 'No se encontraron productos en la base de datos.' });
   }
 
+  // Asociar la cantidad a cada producto y descartar los que no tengan foto
+  // (sin foto no se pueden componer correctamente).
+  const productsWithQty = rows
+    .filter(r => r.foto_path)
+    .map(r => ({ ...r, _qty: qtyBySku[r.ref] || 1 }));
+  if (productsWithQty.length === 0) {
+    await markFailed(supabase, ref, 'Ningún producto del bodegón tiene foto.');
+    return json(400, { error: 'Ningún producto del bodegón tiene foto.' });
+  }
+
   // 3) Cargar plantilla de prompt (configurable desde Settings)
   let template = DEFAULT_PROMPT_TEMPLATE;
   try {
@@ -211,18 +257,19 @@ export const handler = async (event) => {
   } catch {}
 
   // 4) Construir prompt
-  const productsBlock = buildProductsBlock(rows);
+  const { block: productsBlock, totalUnits, sorted: sortedProducts } = buildProductsBlock(productsWithQty);
   const prompt = template
     .replace('{PRODUCTS}', productsBlock)
-    .replace('{N}', String(rows.length));
+    .replace(/\{N\}/g, String(totalUnits))
+    + '\n\n' + QUANTITY_RULES.replace(/\{N\}/g, String(totalUnits));
 
   // Guardar el prompt usado (para referencia) y mantener estado 'generating'
   await supabase.from('bodegones').update({ prompt_usado: prompt }).eq('ref', ref);
 
-  // 5) Descargar imágenes de referencia (vía Storage público)
+  // 5) Descargar imágenes de referencia EN EL MISMO ORDEN que el bloque de
+  // texto, para que "PRODUCT #N — REFERENCE IMAGE #N" mapee correctamente.
   const refImages = [];
-  for (const r of rows) {
-    if (!r.foto_path) continue;
+  for (const r of sortedProducts) {
     try {
       const { data } = supabase.storage.from('productos').getPublicUrl(r.foto_path);
       const inline = await fetchAsBase64(data.publicUrl);
