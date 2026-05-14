@@ -91,7 +91,17 @@ export default function App() {
       return copy;
     });
   };
-  const toggle = (sku) => addUnit(sku); // compat: el click sigue "añadiendo"
+  // Click en la card: si no está seleccionado lo selecciona (1 unidad);
+  // si ya estaba seleccionado lo deselecciona por completo (todas las unidades).
+  const toggle = (sku) => {
+    if (selected.includes(sku)) {
+      setSelected(s => s.filter(x => x !== sku));
+      setQtys(q => { const copy = { ...q }; delete copy[sku]; return copy; });
+    } else {
+      setSelected(s => [...s, sku]);
+      setQtys(q => ({ ...q, [sku]: 1 }));
+    }
+  };
   const clearSel = () => { setSelected([]); setQtys({}); };
 
   const handleCreate = () => {

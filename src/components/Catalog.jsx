@@ -184,6 +184,7 @@ export default function Catalog({
             p={p}
             sel={selected.includes(p.sku)}
             qty={qtys[p.sku] || 0}
+            onToggle={() => onToggle(p.sku)}
             onAdd={() => onAddUnit(p.sku)}
             onRemove={() => onRemoveUnit(p.sku)}
           />
@@ -268,20 +269,31 @@ export default function Catalog({
   );
 }
 
-function ProductCard({ p, sel, qty = 0, onAdd, onRemove }) {
+function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove }) {
   const { catLabels, tagLabels } = useTaxonomy();
   const catLabel = catLabels[p.cat] || p.cat;
   const noPhoto = !p.img;
   const [bump, setBump] = React.useState(false);
 
+  const doBump = () => {
+    setBump(true);
+    setTimeout(() => setBump(false), 320);
+  };
+
+  // Click en la card: selecciona / deselecciona el producto por completo.
   const handleClick = () => {
     if (noPhoto) {
       alert(`"${p.name}" no tiene foto. Edita el producto y sube una imagen para poder incluirlo en un bodegón.`);
       return;
     }
+    onToggle();
+    if (!sel) doBump();
+  };
+  // Botón "+": suma una unidad. Botón "−": resta una (a 0 deselecciona).
+  const handleAdd = (e) => {
+    e.stopPropagation();
     onAdd();
-    setBump(true);
-    setTimeout(() => setBump(false), 320);
+    doBump();
   };
   const handleRemove = (e) => {
     e.stopPropagation();
@@ -289,10 +301,17 @@ function ProductCard({ p, sel, qty = 0, onAdd, onRemove }) {
   };
 
   return (
-    <button
-      type="button"
+    // Es un <div role="button"> y no un <button> porque contiene botones
+    // anidados (el selector de unidades), y un <button> dentro de otro es
+    // HTML inválido y rompe el manejo de clics.
+    <div
+      role="button"
+      tabIndex={0}
       className={`pcard ${sel ? 'sel' : ''} ${noPhoto ? 'nophoto' : ''}`}
       onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); }
+      }}
       aria-pressed={sel}
       title={noPhoto ? 'Sin foto · no se puede usar en bodegones' : ''}
     >
@@ -310,19 +329,32 @@ function ProductCard({ p, sel, qty = 0, onAdd, onRemove }) {
               : <span className="pcard-badge-check">{I.check({ size: 14 })}</span>}
           </div>
         )}
-        {/* Control para restar unidades — solo visible cuando el producto está seleccionado */}
-        {!noPhoto && sel && (
-          <button
-            type="button"
-            className="pcard-minus"
-            onClick={handleRemove}
-            aria-label="Quitar una unidad"
-            title={qty >= 2 ? 'Quitar una unidad' : 'Quitar del bodegón'}
-          >−</button>
-        )}
-        {!noPhoto && (
+        {/* Hint al pasar el ratón — solo cuando el producto NO está seleccionado */}
+        {!noPhoto && !sel && (
           <div className="pcard-tap" aria-hidden>
-            <span>{sel ? '+ unidad' : 'Añadir'}</span>
+            <span>Añadir</span>
+          </div>
+        )}
+        {/* Selector de unidades — solo visible cuando el producto está seleccionado */}
+        {!noPhoto && sel && (
+          <div
+            className="pcard-stepper"
+            onClick={(e) => e.stopPropagation()}
+            title="Ajusta las unidades de este producto"
+          >
+            <button
+              type="button"
+              className="pcard-step"
+              onClick={handleRemove}
+              aria-label="Quitar una unidad"
+            >−</button>
+            <span className="pcard-step-count">{qty} {qty === 1 ? 'unidad' : 'unidades'}</span>
+            <button
+              type="button"
+              className="pcard-step"
+              onClick={handleAdd}
+              aria-label="Añadir una unidad"
+            >+</button>
           </div>
         )}
       </div>
@@ -378,28 +410,26 @@ function ProductCard({ p, sel, qty = 0, onAdd, onRemove }) {
         @keyframes badgeBump{0%{transform:scale(1)}40%{transform:scale(1.32)}100%{transform:scale(1)}}
         .pcard-badge-qty{display:inline-block}
 
-        /* Botón "−" para restar unidades, esquina inferior derecha de la imagen */
-        .pcard-minus{position:absolute;bottom:10px;right:10px;width:26px;height:26px;border-radius:50%;background:#fff;border:1.5px solid var(--line);color:var(--ink-2);display:grid;place-items:center;font-size:18px;font-weight:600;line-height:1;cursor:pointer;transition:all .15s;box-shadow:0 2px 8px rgba(45,42,38,.12);padding:0;z-index:3}
-        .pcard-minus:hover{background:var(--accent);border-color:var(--accent);color:#fff;transform:scale(1.1)}
+        /* Selector de unidades — pill centrada abajo, visible cuando la card está seleccionada */
+        .pcard-stepper{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:1px;background:#fff;border:1.5px solid var(--accent);border-radius:99px;padding:3px;box-shadow:0 4px 14px -4px rgba(167,77,74,.45);z-index:3}
+        .pcard-step{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:17px;font-weight:600;line-height:1;color:var(--accent);background:transparent;transition:all .12s;padding:0}
+        .pcard-step:hover{background:var(--accent);color:#fff}
+        .pcard-step:active{transform:scale(.92)}
+        .pcard-step-count{font-size:11px;font-weight:600;color:var(--ink);min-width:60px;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:.01em}
 
         .pcard-tap{position:absolute;left:50%;bottom:14px;transform:translate(-50%,8px);background:var(--ink);color:var(--paper);font-size:11px;font-weight:600;letter-spacing:.04em;padding:6px 14px;border-radius:99px;opacity:0;transition:all .2s;pointer-events:none;white-space:nowrap;box-shadow:0 6px 16px rgba(0,0,0,.18)}
         .pcard:hover .pcard-tap{opacity:1;transform:translate(-50%,0)}
-        .pcard.sel .pcard-tap{background:var(--accent)}
-        .pcard.sel:hover .pcard-tap{opacity:1}
-        /* En cards seleccionadas, el "+ unidad" se mueve a la izquierda para no chocar con el botón "−" */
-        .pcard.sel .pcard-tap{left:auto;right:46px;transform:translate(0,8px)}
-        .pcard.sel:hover .pcard-tap{transform:translate(0,0)}
         .pname{font-size:14.5px;font-weight:600;color:var(--ink);line-height:1.3;letter-spacing:-.005em;font-family:'Fraunces',serif}
         .pmeta{font-size:11.5px;color:var(--muted);margin-top:5px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
         .pmeta-l{display:flex;align-items:center;gap:6px;min-width:0}
-        .ptag-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;min-height:22px}
+        .ptag-row{display:flex;align-items:flex-start;flex-wrap:wrap;gap:4px;margin-top:8px;min-height:22px}
         .ptag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);font-weight:600;background:var(--bg);border:1px solid var(--line);padding:3px 7px;border-radius:99px}
         .pcard.sel .ptag{background:#fff;border-color:var(--accent-soft);color:var(--accent)}
         .psku{letter-spacing:.4px;font-weight:500}
         .psep{color:var(--line)}
         .pdim{color:var(--ink-2);font-weight:500}
       `}</style>
-    </button>
+    </div>
   );
 }
 
