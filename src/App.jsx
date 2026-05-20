@@ -7,6 +7,8 @@ import HistoryScreen from './components/HistoryScreen.jsx';
 import SettingsScreen from './components/SettingsScreen.jsx';
 import BodegonOverlay from './components/BodegonOverlay.jsx';
 import ImportExcelModal from './components/ImportExcelModal.jsx';
+import SpecialOrderModal from './components/SpecialOrderModal.jsx';
+import BodegonEditOverlay from './components/BodegonEditOverlay.jsx';
 import {
   listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
   listBodegones, updateBodegon, deleteBodegon,
@@ -35,6 +37,10 @@ export default function App() {
   const [editProduct, setEditProduct] = useState(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editInitialFile, setEditInitialFile] = useState(null);
+  const [specialOrderOpen, setSpecialOrderOpen] = useState(false);
+
+  // Editar un bodegón del historial (regenerar o crear como nuevo).
+  const [editBodegon, setEditBodegon] = useState(null);
 
   // Bodegón
   const [bodegonNumber, setBodegonNumber] = useState(1);
@@ -103,6 +109,19 @@ export default function App() {
     }
   };
   const clearSel = () => { setSelected([]); setQtys({}); };
+
+  // Llamado desde SpecialOrderModal: precarga selección y lanza el overlay.
+  const handleSpecialOrderConfirm = ({ items, title, description }) => {
+    if (!items || !items.length) return;
+    const skus = items.map(i => i.sku);
+    const qtyMap = Object.fromEntries(items.map(i => [i.sku, i.qty || 1]));
+    setSelected(skus);
+    setQtys(qtyMap);
+    setBodegonTitle(title || `Bodegón IA #${bodegonNumber}`);
+    setBodegonDesc(description || '');
+    setSpecialOrderOpen(false);
+    setBodegonOpen(true);
+  };
 
   const handleCreate = () => {
     if (selected.length < 2) {
@@ -254,6 +273,7 @@ export default function App() {
           onClearSel={clearSel}
           onCreateProduct={openNew}
           onImport={() => setImportOpen(true)}
+          onSpecialOrder={() => setSpecialOrderOpen(true)}
         />
       )}
 
@@ -274,6 +294,7 @@ export default function App() {
           onRename={handleRenameBodegon}
           onDelete={handleDeletedBodegon}
           onRefresh={refreshHistory}
+          onEdit={(b) => setEditBodegon(b)}
         />
       )}
 
@@ -305,6 +326,25 @@ export default function App() {
         onSaved={handleSavedBodegon}
         onDeleted={handleDeletedBodegon}
       />
+
+      <SpecialOrderModal
+        open={specialOrderOpen}
+        onClose={() => setSpecialOrderOpen(false)}
+        products={products}
+        onConfirm={handleSpecialOrderConfirm}
+      />
+
+      {editBodegon && (
+        <BodegonEditOverlay
+          bodegon={editBodegon}
+          products={products}
+          onClose={() => setEditBodegon(null)}
+          onConfirm={({ items, title, description }) => {
+            setEditBodegon(null);
+            handleSpecialOrderConfirm({ items, title, description });
+          }}
+        />
+      )}
 
       {!SUPABASE_READY && !loading && (
         <div style={{

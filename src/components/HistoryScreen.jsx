@@ -42,7 +42,7 @@ function bucketLabel(d) {
   return d === 0 ? 'Hoy' : d === 1 ? 'Ayer' : d <= 6 ? 'Esta semana' : d <= 30 ? 'Este mes' : 'Anteriores';
 }
 
-export default function HistoryScreen({ products, history, onRename, onDelete, onRefresh }) {
+export default function HistoryScreen({ products, history, onRename, onDelete, onRefresh, onEdit }) {
   const [range, setRange] = useState('all');
   const [q, setQ] = useState('');
   const [cols, setCols] = useState(() => Number(localStorage.getItem('hist-cols')) || 4);
@@ -227,6 +227,13 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                     )}
                     <div className="hact" onClick={e => e.stopPropagation()}>
                       <button className="hbtn danger" title="Eliminar" onClick={()=>onDelete && onDelete(it.id)}>{I.trash({ size: 14 })}</button>
+                      {onEdit && (
+                        <button
+                          className="hbtn"
+                          title="Editar productos y crear nueva versión"
+                          onClick={(e)=>{ e.stopPropagation(); onEdit(it); }}
+                        >{I.edit({ size: 13 })} {cols < 8 && 'Editar'}</button>
+                      )}
                       <button className="hbtn primary" onClick={(e)=>{ e.stopPropagation(); openDownload(it); }}>{I.download({ size: 13 })} {cols < 8 && 'Descargar'}</button>
                     </div>
                   </div>
@@ -310,6 +317,12 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                 })}
               </div>
               <div className="lb-actions">
+                {onEdit && (
+                  <button
+                    className="hbtn"
+                    onClick={() => { onEdit(lightbox); setLightbox(null); }}
+                  >{I.edit({ size: 13 })} Editar productos</button>
+                )}
                 <button className="hbtn primary" onClick={()=>openDownload(lightbox)}>{I.download({ size: 13 })} Descargar</button>
               </div>
             </div>

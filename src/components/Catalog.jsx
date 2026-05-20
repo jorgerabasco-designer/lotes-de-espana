@@ -24,6 +24,7 @@ export default function Catalog({
   selBrands = [], setSelBrands,
   cats = [], allTags = [], brands = [],
   onCreate, onCreateProduct, onClearSel, onImport,
+  onSpecialOrder,
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const [cols, setCols] = useState(() => Number(localStorage.getItem('catalog-cols')) || 4);
@@ -69,6 +70,15 @@ export default function Catalog({
           <p className="cat-sub">Selecciona productos gourmet y genera composiciones IA premium.</p>
         </div>
         <div className="cat-head-r">
+          {onSpecialOrder && (
+            <button
+              className="btn btn-ghost btn-special"
+              onClick={onSpecialOrder}
+              title="Sube un PDF o Excel del cliente y detectamos los productos"
+            >
+              {I.upload({ size: 15 })} Pedidos especiales
+            </button>
+          )}
           <button className="btn btn-primary" onClick={onCreateProduct}>{I.plus({ size: 16 })} Nuevo producto</button>
         </div>
       </header>
@@ -204,6 +214,8 @@ export default function Catalog({
         .btn-ghost:hover{border-color:#cdc4b3;transform:translateY(-1px);box-shadow:var(--shadow)}
         .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(167,77,74,.3),0 4px 14px -4px rgba(167,77,74,.4)}
         .btn-primary:hover{background:var(--accent-2);transform:translateY(-1px);box-shadow:0 2px 4px rgba(167,77,74,.4),0 12px 24px -8px rgba(167,77,74,.5)}
+        .btn-special{background:#fff;border-color:var(--accent);color:var(--accent)}
+        .btn-special:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2);transform:translateY(-1px)}
 
         .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
         .search{flex:1;display:flex;align-items:center;gap:10px;padding:0 14px;height:42px;background:#fff;border:1px solid var(--line);border-radius:11px;color:var(--muted);transition:all .15s;min-width:200px}

@@ -1,11 +1,15 @@
 export const DEFAULT_CATEGORIES = [
-  { id: 'vinos',     label: 'Vinos' },
-  { id: 'aceites',   label: 'Aceites' },
-  { id: 'turrones',  label: 'Turrones' },
-  { id: 'conservas', label: 'Conservas' },
-  { id: 'galletas',  label: 'Galletas' },
-  { id: 'snacks',    label: 'Snacks' },
-  { id: 'dulces',    label: 'Dulces' },
+  { id: 'vinos',        label: 'Vinos' },
+  { id: 'bebidas',      label: 'Bebidas' },
+  { id: 'aceites',      label: 'Aceites' },
+  { id: 'turrones',     label: 'Turrones' },
+  { id: 'conservas',    label: 'Conservas' },
+  { id: 'galletas',     label: 'Galletas' },
+  { id: 'snacks',       label: 'Snacks' },
+  { id: 'dulces',       label: 'Dulces' },
+  { id: 'quesos',       label: 'Quesos' },
+  { id: 'ibericos',     label: 'Ibéricos' },
+  { id: 'charcuteria',  label: 'Charcutería' },
 ];
 
 export const DEFAULT_TAGS = [
