@@ -66,7 +66,10 @@ function parseTags(raw) {
 
 const REF_RE = /^[0-9]{2}[A-Z]{2}[0-9]{3}$/;
 
-export default function ImportExcelModal({ open, onClose, onImport, existingSkus = [] }) {
+export default function ImportExcelModal({ open, onClose, onImport, existingSkus = [], showInfo }) {
+  // Fallback: si por alguna razón no nos pasan showInfo (componente usado
+  // fuera del árbol de App), seguimos usando alert() nativo.
+  const info = showInfo || ((cfg) => alert(cfg.description || cfg.title));
   const [stage, setStage] = useState('drop'); // drop | review | importing | done
   const [dragOver, setDragOver] = useState(false);
   const [parsedProducts, setParsedProducts] = useState([]); // [{ data, photoFile, status }]
@@ -111,7 +114,14 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
     const imageFiles = fileArr.filter(f => f.type.startsWith('image/'));
 
     if (!excelFile) {
-      alert('No se ha encontrado un archivo Excel (.xlsx o .csv) en lo que has arrastrado. Asegúrate de incluirlo.');
+      info({
+        icon: 'excel',
+        tone: 'info',
+        title: 'Falta el Excel',
+        description: 'No se ha encontrado un archivo Excel (.xlsx o .csv) en lo que has arrastrado. Asegúrate de incluirlo.',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
 
@@ -133,7 +143,14 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
     const ws = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
     if (rows.length < 2) {
-      alert('El Excel está vacío o no tiene cabecera reconocible.');
+      info({
+        icon: 'excel',
+        tone: 'info',
+        title: 'Excel vacío',
+        description: 'El Excel está vacío o no tiene cabecera reconocible.',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
 
@@ -148,7 +165,14 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
       }
     }
     if (headerRowIdx < 0) {
-      alert('No se han detectado las columnas obligatorias en las primeras 10 filas. Usa la plantilla descargable.');
+      info({
+        icon: 'excel',
+        tone: 'info',
+        title: 'Columnas no detectadas',
+        description: 'No se han detectado las columnas obligatorias en las primeras 10 filas. Usa la plantilla descargable.',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
     const headers = rows[headerRowIdx].map(String);
@@ -272,7 +296,14 @@ export default function ImportExcelModal({ open, onClose, onImport, existingSkus
       setStage('done');
       setSavingsInfo({ optimized: totalOptimized, saved: totalSaved });
     } catch (e) {
-      alert('Error durante la importación: ' + (e.message || e));
+      info({
+        icon: 'trash',
+        tone: 'danger',
+        title: 'Error durante la importación',
+        description: e.message || String(e),
+        confirmLabel: 'Cerrar',
+        confirmTone: 'neutral',
+      });
       setStage('review');
     } finally {
       setBusy(false);

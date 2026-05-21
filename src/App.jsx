@@ -336,6 +336,7 @@ export default function App() {
         initialFile={editInitialFile}
         onClose={() => { setEditOpen(false); setEditInitialFile(null); }}
         onSave={handleSaveProduct}
+        showInfo={showInfo}
       />
 
       <ImportExcelModal
@@ -343,6 +344,7 @@ export default function App() {
         onClose={() => setImportOpen(false)}
         onImport={handleImport}
         existingSkus={products.map(p => p.sku)}
+        showInfo={showInfo}
       />
 
       <BodegonOverlay

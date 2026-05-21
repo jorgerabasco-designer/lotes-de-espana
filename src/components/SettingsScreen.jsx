@@ -5,6 +5,7 @@ import { getSetting, setSetting, diagnoseSupabase, upsertProduct } from '../lib/
 import { SUPABASE_READY } from '../lib/supabase.js';
 import { importSeedProducts, SEED_PRODUCTS } from '../lib/seed.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
+import ConfirmModal from './ConfirmModal.jsx';
 
 export default function SettingsScreen({ products = [], onProductsChanged }) {
   const [section, setSection] = useState('prompt');
@@ -20,6 +21,11 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
   const [diagBusy, setDiagBusy] = useState(false);
   const [diagReport, setDiagReport] = useState(null);
 
+  // Diálogos de confirmación / información
+  const [confirmSeed, setConfirmSeed] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState(false);
+  const [infoModal, setInfoModal] = useState(null);
+
   const handleDiagnose = async () => {
     setDiagBusy(true);
     try {
@@ -30,8 +36,9 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
     }
   };
 
-  const handleImportSeed = async () => {
-    if (!confirm(`Se subirán ${SEED_PRODUCTS.length} productos demo (con sus imágenes) a tu Supabase. ¿Continuar?`)) return;
+  const handleImportSeed = () => setConfirmSeed(true);
+  const doImportSeed = async () => {
+    setConfirmSeed(false);
     setSeedBusy(true);
     setSeedDone(false);
     try {
@@ -41,7 +48,14 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
       setSeedDone(true);
       onProductsChanged && (await onProductsChanged());
     } catch (e) {
-      alert('Error importando datos demo: ' + (e.message || e));
+      setInfoModal({
+        icon: 'trash',
+        tone: 'danger',
+        title: 'Error importando datos demo',
+        description: e.message || String(e),
+        confirmLabel: 'Cerrar',
+        confirmTone: 'neutral',
+      });
     } finally {
       setSeedBusy(false);
       setTimeout(() => setSeedProgress(null), 1500);
@@ -65,10 +79,10 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
     }
   };
 
-  const handleRestore = () => {
-    if (confirm('¿Restaurar el prompt original? Perderás los cambios.')) {
-      setPrompt(DEFAULT_PROMPT_TEMPLATE);
-    }
+  const handleRestore = () => setConfirmRestore(true);
+  const doRestore = () => {
+    setConfirmRestore(false);
+    setPrompt(DEFAULT_PROMPT_TEMPLATE);
   };
 
   const handleCopy = () => {
@@ -170,6 +184,7 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
                 }}
                 placeholder="Nueva categoría — p. ej. Embutidos"
                 pillStyle={false}
+                singularLabel="categoría"
               />
 
               <div className="tax-divider"/>
@@ -194,6 +209,7 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
                 }}
                 placeholder="Nueva etiqueta — p. ej. Artesano"
                 pillStyle={true}
+                singularLabel="etiqueta"
               />
             </div>
           )}
@@ -316,19 +332,66 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
           .set-layout{grid-template-columns:1fr}
         }
       `}</style>
+
+      <ConfirmModal
+        open={confirmSeed}
+        icon="upload"
+        tone="info"
+        title="¿Subir productos demo?"
+        description={(
+          <>Se subirán <strong>{SEED_PRODUCTS.length} productos demo</strong> a tu Supabase, junto con sus imágenes. Los que ya existan no se duplican.</>
+        )}
+        cancelLabel="Cancelar"
+        confirmLabel="Sí, subir"
+        confirmTone="neutral"
+        onCancel={() => setConfirmSeed(false)}
+        onConfirm={doImportSeed}
+      />
+
+      <ConfirmModal
+        open={confirmRestore}
+        icon="refresh"
+        tone="info"
+        title="¿Restaurar el prompt original?"
+        description={(
+          <>Volverás al prompt por defecto. <strong>Perderás los cambios</strong> que tengas en el editor (todavía no se guarda en Supabase hasta que pulses "Guardar").</>
+        )}
+        cancelLabel="Cancelar"
+        confirmLabel="Restaurar"
+        confirmTone="neutral"
+        onCancel={() => setConfirmRestore(false)}
+        onConfirm={doRestore}
+      />
+
+      {infoModal && (
+        <ConfirmModal
+          open={true}
+          icon={infoModal.icon}
+          tone={infoModal.tone}
+          title={infoModal.title}
+          description={infoModal.description}
+          cancelLabel={infoModal.cancelLabel ?? null}
+          confirmLabel={infoModal.confirmLabel || 'Entendido'}
+          confirmTone={infoModal.confirmTone || 'neutral'}
+          onCancel={() => setInfoModal(null)}
+          onConfirm={() => setInfoModal(null)}
+        />
+      )}
     </section>
   );
 }
 
-function TaxonomyEditor({ title, subtitle, items, count, onAdd, onUpdate, onRemove, placeholder, pillStyle }) {
+function TaxonomyEditor({ title, subtitle, items, count, onAdd, onUpdate, onRemove, placeholder, pillStyle, singularLabel }) {
   const [draft, setDraft] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(null);  // { item, used }
+  const [duplicateModal, setDuplicateModal] = useState(false);
 
   const handleAdd = () => {
     const ok = onAdd(draft);
     if (ok) setDraft('');
-    else if (draft.trim()) alert('Esa entrada ya existe.');
+    else if (draft.trim()) setDuplicateModal(true);
   };
 
   const startEdit = (item) => {
@@ -343,12 +406,16 @@ function TaxonomyEditor({ title, subtitle, items, count, onAdd, onUpdate, onRemo
 
   const handleRemove = (item) => {
     const used = count(item.id);
-    let msg = `¿Eliminar "${item.label}"?`;
-    if (used > 0) {
-      msg += `\n\nEsta entrada está usada por ${used} ${used === 1 ? 'producto' : 'productos'}. Esos productos NO se borran, solo perderán esta clasificación.`;
-    }
-    if (confirm(msg)) onRemove(item.id);
+    setConfirmRemove({ item, used });
   };
+  const doRemove = () => {
+    if (!confirmRemove) return;
+    const id = confirmRemove.item.id;
+    setConfirmRemove(null);
+    onRemove(id);
+  };
+
+  const sLabel = singularLabel || 'entrada';
 
   return (
     <div className="tax-section">
@@ -411,6 +478,42 @@ function TaxonomyEditor({ title, subtitle, items, count, onAdd, onUpdate, onRemo
           {I.plus({ size: 13 })} Añadir
         </button>
       </div>
+
+      <ConfirmModal
+        open={!!confirmRemove}
+        icon="trash"
+        tone="danger"
+        title={confirmRemove ? `¿Eliminar "${confirmRemove.item.label}"?` : ''}
+        description={confirmRemove ? (
+          confirmRemove.used > 0 ? (
+            <>
+              Esta {sLabel} está usada por <strong>{confirmRemove.used} {confirmRemove.used === 1 ? 'producto' : 'productos'}</strong>.
+              Esos productos no se borran, solo perderán esta clasificación.
+              Esta acción no se puede deshacer.
+            </>
+          ) : (
+            <>Vas a eliminar la {sLabel} <strong>{confirmRemove.item.label}</strong>. Esta acción no se puede deshacer.</>
+          )
+        ) : null}
+        cancelLabel="Cancelar"
+        confirmLabel={`Eliminar ${sLabel}`}
+        confirmTone="danger"
+        onCancel={() => setConfirmRemove(null)}
+        onConfirm={doRemove}
+      />
+
+      <ConfirmModal
+        open={duplicateModal}
+        icon="plus"
+        tone="info"
+        title="Esa entrada ya existe"
+        description={`Ya hay una ${sLabel} con ese nombre. Prueba con uno distinto.`}
+        cancelLabel={null}
+        confirmLabel="Entendido"
+        confirmTone="neutral"
+        onCancel={() => setDuplicateModal(false)}
+        onConfirm={() => setDuplicateModal(false)}
+      />
     </div>
   );
 }

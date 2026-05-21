@@ -6,7 +6,9 @@ import { optimizeImage, formatBytes } from '../lib/image-optimize.js';
 
 const EMPTY_PRODUCT = { sku: '', name: '', brand: '', cat: 'vinos', h: '', w: '', d: '', img: '', tags: [], desc: '', posicion: '', descripcion_visual: '', notas: '' };
 
-export default function ProductEditOverlay({ open, product, initialFile, onClose, onSave }) {
+export default function ProductEditOverlay({ open, product, initialFile, onClose, onSave, showInfo }) {
+  // Fallback si no nos pasan showInfo
+  const info = showInfo || ((cfg) => alert(cfg.description || cfg.title));
   const isNew = !product?.sku;
   const [form, setForm] = useState(() => product ? { ...EMPTY_PRODUCT, ...product } : EMPTY_PRODUCT);
   const [pendingFile, setPendingFile] = useState(null);
@@ -45,7 +47,14 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   const handleFile = async (file) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      alert('El archivo tiene que ser una imagen (PNG, JPG, WEBP).');
+      info({
+        icon: 'upload',
+        tone: 'info',
+        title: 'Archivo no válido',
+        description: 'El archivo tiene que ser una imagen (PNG, JPG, WEBP).',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
     setOptimizing(true);
@@ -104,7 +113,14 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   const handleGenerateDesc = async () => {
     if (genDescBusy) return;
     if (!pendingFile && !form.foto_path) {
-      alert('Sube primero una foto del producto.');
+      info({
+        icon: 'upload',
+        tone: 'info',
+        title: 'Falta la foto',
+        description: 'Sube primero una foto del producto. La IA necesita la imagen para escribir la descripción.',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
     setGenDescBusy(true);
@@ -114,7 +130,14 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
       );
       if (description) upd('descripcion_visual', description);
     } catch (e) {
-      alert('Error generando descripción: ' + (e.message || e));
+      info({
+        icon: 'sparkle',
+        tone: 'danger',
+        title: 'No se pudo generar la descripción',
+        description: e.message || String(e),
+        confirmLabel: 'Cerrar',
+        confirmTone: 'neutral',
+      });
     } finally {
       setGenDescBusy(false);
     }

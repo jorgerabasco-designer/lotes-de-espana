@@ -23,7 +23,7 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
           <p className="cat-sub">Gestión completa de tu catálogo · {products.length} productos</p>
         </div>
         <div className="screen-head-r">
-          <button className="btn btn-ghost" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
+          <button className="btn btn-special" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
           <button className="btn btn-primary" onClick={onNew}>{I.plus({ size: 16 })} Nuevo producto</button>
         </div>
       </header>
@@ -113,6 +113,8 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
         .btn-primary:hover{background:var(--accent-2);transform:translateY(-1px)}
         .btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink)}
         .btn-ghost:hover{border-color:#cdc4b3}
+        .btn-special{background:#fff;border:1px solid var(--accent);color:var(--accent)}
+        .btn-special:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-2);transform:translateY(-1px)}
         .btn-danger-solid{background:var(--accent);color:#fff;border:1px solid var(--accent);box-shadow:0 1px 2px rgba(167,77,74,.3),0 4px 14px -4px rgba(167,77,74,.4)}
         .btn-danger-solid:hover{background:var(--accent-2)}
         .toolbar{display:flex;gap:8px;flex-wrap:wrap}
