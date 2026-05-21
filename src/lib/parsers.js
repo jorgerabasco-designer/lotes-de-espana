@@ -267,9 +267,7 @@ export function resolveOrder(parsed, products) {
     } else {
       unmatched.push({
         original: { name: it.name },
-        reason: best
-          ? `Sin coincidencia suficiente (mejor: ${best.name} · ${Math.round(bestScore * 100)}%).`
-          : 'Sin coincidencia en el catálogo.',
+        reason: 'Referencia no encontrada en el catálogo.',
       });
     }
   }

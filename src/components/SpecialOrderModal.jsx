@@ -176,11 +176,9 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
               accept=".pdf,.xlsx,.xls,.xlsm,application/pdf"
               onChange={e => handleFile(e.target.files?.[0])}
               className="so-drop-input"
+              title=""
+              aria-label="Subir PDF o Excel"
             />
-            <div className="so-formats">
-              <span><b>PDF</b>: detectamos referencias y nombre del cliente.</span>
-              <span><b>Excel</b>: detectamos por nombre del producto.</span>
-            </div>
           </div>
         )}
 
@@ -289,11 +287,9 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
                 </div>
                 <div className="so-warn-box">
                   <div className="so-warn-icon">{I.warning ? I.warning({ size: 16 }) : '!'}</div>
-                  <div>
+                  <div className="so-warn-text">
                     <div className="so-warn-t">
-                      Algunos productos del pedido no están en el catálogo
-                      {fileType === 'pdf' && ' (suelen ser referencias de IVA, cajas, regalos…).'}
-                      {fileType === 'excel' && ' (no se ha encontrado un nombre parecido).'}
+                      Algunos productos del pedido no están en el catálogo.
                     </div>
                     <div className="so-warn-s">
                       Puedes continuar y generar el bodegón solo con los disponibles, o cancelar y revisar el fichero.
@@ -350,9 +346,7 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
           .so-drop-icon{width:54px;height:54px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;margin-bottom:8px}
           .so-drop-t{font-size:15px;font-weight:600;color:var(--ink)}
           .so-drop-s{font-size:12.5px;color:var(--muted)}
-          .so-drop-input{position:absolute;inset:0;opacity:0;cursor:pointer}
-          .so-formats{display:flex;gap:18px;margin-top:14px;font-size:11.5px;color:var(--muted);text-align:center;flex-wrap:wrap;justify-content:center}
-          .so-formats b{color:var(--ink-2)}
+          .so-drop-input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0;color:transparent}
 
           .so-busy{padding:64px 28px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
           .so-busy-orb{width:44px;height:44px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#fff,var(--accent-soft));animation:boOrb 1.4s ease-in-out infinite}
@@ -377,18 +371,18 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
           .so-section-c{font-weight:500;letter-spacing:.04em;text-transform:none;font-size:11px;color:var(--muted);background:var(--bg);padding:2px 8px;border-radius:99px}
 
           .so-list{display:flex;flex-direction:column;gap:4px}
-          .so-list.small .so-item{padding:8px 10px;background:rgba(167,77,74,.04)}
-          .so-item{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:10px;transition:all .15s}
+          .so-list.small .so-item{padding:10px 12px;background:#fff}
+          .so-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;transition:all .15s}
           .so-item.gone{opacity:.55}
-          .so-item.unmatched{background:rgba(167,77,74,.05);border-color:rgba(167,77,74,.15)}
+          .so-item.unmatched{background:#fff;border-color:rgba(167,77,74,.18)}
           .so-item-img{width:36px;height:36px;border-radius:6px;background:#fff;border:1px solid var(--line);overflow:hidden;flex-shrink:0;padding:3px;display:grid;place-items:center}
           .so-item-img img{width:100%;height:100%;object-fit:contain}
           .so-item-noimg{color:var(--muted);opacity:.5}
-          .so-item-info{flex:1;min-width:0}
-          .so-item-n{font-size:13px;font-weight:600;color:var(--ink);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-          .so-item-m{font-size:11px;color:var(--muted);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+          .so-item-info{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px}
+          .so-item-n{font-size:13px;font-weight:600;color:var(--ink);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:8px}
+          .so-item-m{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;line-height:1.35}
           .so-sku{letter-spacing:.4px;font-weight:600;font-variant-numeric:tabular-nums}
-          .so-sku-inline{display:inline-block;background:var(--bg);padding:1px 6px;border-radius:4px;font-weight:700;font-size:10.5px;letter-spacing:.3px;margin-right:6px;color:var(--ink-2)}
+          .so-sku-inline{display:inline-flex;align-items:center;background:var(--bg);padding:2px 8px;border-radius:5px;font-weight:700;font-size:11px;letter-spacing:.4px;color:var(--ink-2);flex-shrink:0;font-variant-numeric:tabular-nums}
           .so-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);padding:1px 7px;border-radius:99px;font-weight:600}
 
           .so-stepper{display:flex;align-items:center;gap:1px;background:#fff;border:1px solid var(--line);border-radius:99px;padding:2px;flex-shrink:0}
@@ -401,10 +395,11 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
           .so-item-restore{font-size:11px;font-weight:600;color:var(--accent);background:transparent;border:1px solid var(--accent);border-radius:99px;padding:5px 12px;transition:all .15s;flex-shrink:0}
           .so-item-restore:hover{background:var(--accent);color:#fff}
 
-          .so-warn-box{display:flex;gap:10px;padding:12px 14px;background:rgba(167,77,74,.06);border:1px solid rgba(167,77,74,.2);border-radius:10px;align-items:flex-start;margin-top:6px}
-          .so-warn-icon{width:24px;height:24px;flex-shrink:0;border-radius:6px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px;font-family:'Fraunces',serif}
-          .so-warn-t{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.35}
-          .so-warn-s{font-size:11.5px;color:var(--ink-2);margin-top:3px;line-height:1.45}
+          .so-warn-box{display:flex;gap:12px;padding:14px;background:rgba(167,77,74,.06);border:1px solid rgba(167,77,74,.2);border-radius:10px;align-items:flex-start;margin-top:6px;margin-bottom:8px}
+          .so-warn-icon{width:22px;height:22px;flex-shrink:0;border-radius:6px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px;font-family:'Fraunces',serif;margin-top:1px}
+          .so-warn-text{flex:1;min-width:0}
+          .so-warn-t{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.4}
+          .so-warn-s{font-size:11.5px;color:var(--ink-2);margin-top:4px;line-height:1.5}
 
           .so-foot{display:flex;gap:8px;padding:14px 28px;border-top:1px solid var(--line);background:#fff;flex-shrink:0}
           .so-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 16px;border-radius:10px;font-size:13px;font-weight:600;transition:all .15s;cursor:pointer;border:1px solid transparent}
