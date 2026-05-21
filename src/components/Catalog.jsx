@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { I } from './icons.jsx';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
+import ConfirmModal from './ConfirmModal.jsx';
 
 const DensityIcon = ({ n }) => {
   const sz = n <= 4 ? 3.5 : n <= 6 ? 2.2 : 1.5;
@@ -24,12 +25,17 @@ export default function Catalog({
   selBrands = [], setSelBrands,
   cats = [], allTags = [], brands = [],
   onCreate, onCreateProduct, onClearSel, onImport,
-  onSpecialOrder,
+  onSpecialOrder, onEditProduct,
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const [cols, setCols] = useState(() => Number(localStorage.getItem('catalog-cols')) || 4);
   const setColsP = (n) => { setCols(n); localStorage.setItem('catalog-cols', String(n)); };
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Producto seleccionado al que le falta la foto (se muestra un modal con
+  // la opción de editar para que el usuario suba la imagen).
+  const [noPhotoProduct, setNoPhotoProduct] = useState(null);
+  // Aviso de drag-drop con un fichero que no es una imagen.
+  const [dropError, setDropError] = useState(null);
 
   const activeFilters = (cat !== 'all' ? 1 : 0) + tags.length + selBrands.length;
   const totalUnits = selected.reduce((sum, sku) => sum + (qtys[sku] || 1), 0);
@@ -197,9 +203,10 @@ export default function Catalog({
             onToggle={() => onToggle(p.sku)}
             onAdd={() => onAddUnit(p.sku)}
             onRemove={() => onRemoveUnit(p.sku)}
+            onNoPhoto={() => setNoPhotoProduct(p)}
           />
         ))}
-        <UploadCard onClick={onCreateProduct} />
+        <UploadCard onClick={onCreateProduct} onInvalidDrop={() => setDropError('El archivo que has arrastrado no es una imagen. Suelta un PNG, JPG, WEBP, etc.')} />
       </div>
 
       <style>{`
@@ -277,11 +284,44 @@ export default function Catalog({
           .mobile-only{display:inline-flex !important;align-items:center !important;gap:5px !important;height:42px !important;padding:0 14px !important}
         }
       `}</style>
+
+      <ConfirmModal
+        open={!!noPhotoProduct}
+        icon="upload"
+        tone="info"
+        title="Este producto no tiene foto"
+        description={noPhotoProduct ? (
+          <><strong>{noPhotoProduct.name}</strong> ({noPhotoProduct.sku}) no tiene una imagen asociada y no se puede incluir en un bodegón hasta que la subas.</>
+        ) : null}
+        cancelLabel="Cancelar"
+        confirmLabel={null}
+        secondaryLabel="Editar producto"
+        secondaryIcon="edit"
+        onCancel={() => setNoPhotoProduct(null)}
+        onSecondary={() => {
+          const p = noPhotoProduct;
+          setNoPhotoProduct(null);
+          if (p && onEditProduct) onEditProduct(p);
+        }}
+      />
+
+      <ConfirmModal
+        open={!!dropError}
+        icon="upload"
+        tone="info"
+        title="Archivo no válido"
+        description={dropError}
+        cancelLabel={null}
+        confirmLabel="Entendido"
+        confirmTone="neutral"
+        onCancel={() => setDropError(null)}
+        onConfirm={() => setDropError(null)}
+      />
     </section>
   );
 }
 
-function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove }) {
+function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove, onNoPhoto }) {
   const { catLabels, tagLabels } = useTaxonomy();
   const catLabel = catLabels[p.cat] || p.cat;
   const noPhoto = !p.img;
@@ -295,7 +335,8 @@ function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove }) {
   // Click en la card: selecciona / deselecciona el producto por completo.
   const handleClick = () => {
     if (noPhoto) {
-      alert(`"${p.name}" no tiene foto. Edita el producto y sube una imagen para poder incluirlo en un bodegón.`);
+      // Catalog muestra un modal con el aviso y la opción de editar el producto.
+      onNoPhoto && onNoPhoto();
       return;
     }
     onToggle();
@@ -445,7 +486,7 @@ function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove }) {
   );
 }
 
-function UploadCard({ onClick }) {
+function UploadCard({ onClick, onInvalidDrop }) {
   const [dragOver, setDragOver] = React.useState(false);
   const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true); };
   const onDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(false); };
@@ -457,7 +498,7 @@ function UploadCard({ onClick }) {
     if (file && file.type.startsWith('image/')) {
       onClick(file);
     } else if (file) {
-      alert('El archivo tiene que ser una imagen.');
+      onInvalidDrop && onInvalidDrop();
     }
   };
   return (

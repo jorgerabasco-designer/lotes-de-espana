@@ -16,7 +16,7 @@ import { I } from './icons.jsx';
 //   products   lista de productos del catálogo
 //   onClose    () => void
 //   onConfirm  ({ items: [{sku,qty}], title, description }) => void
-export default function BodegonEditOverlay({ bodegon, products, onClose, onConfirm }) {
+export default function BodegonEditOverlay({ bodegon, products, onClose, onConfirm, showInfo }) {
   if (!bodegon) return null;
 
   // Estado inicial: traemos los items del bodegón (formato nuevo [{sku,qty}] o
@@ -67,7 +67,16 @@ export default function BodegonEditOverlay({ bodegon, products, onClose, onConfi
   const handleConfirm = () => {
     const finalItems = items.filter(it => it.qty > 0);
     if (finalItems.length < 2) {
-      alert('Necesitas al menos 2 productos para crear un bodegón.');
+      const cfg = {
+        icon: 'sparkle',
+        tone: 'info',
+        title: 'Necesitas al menos 2 productos',
+        description: 'Un bodegón se compone con un mínimo de 2 productos. Añade alguno desde el catálogo o ajusta las unidades.',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      };
+      if (showInfo) showInfo(cfg);
+      else alert(cfg.description);
       return;
     }
     onConfirm && onConfirm({

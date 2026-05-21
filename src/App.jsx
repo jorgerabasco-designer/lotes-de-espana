@@ -9,6 +9,7 @@ import BodegonOverlay from './components/BodegonOverlay.jsx';
 import ImportExcelModal from './components/ImportExcelModal.jsx';
 import SpecialOrderModal from './components/SpecialOrderModal.jsx';
 import BodegonEditOverlay from './components/BodegonEditOverlay.jsx';
+import ConfirmModal from './components/ConfirmModal.jsx';
 import {
   listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
   listBodegones, updateBodegon, deleteBodegon,
@@ -41,6 +42,11 @@ export default function App() {
 
   // Editar un bodegón del historial (regenerar o crear como nuevo).
   const [editBodegon, setEditBodegon] = useState(null);
+
+  // Diálogo informativo / de aviso global (sustituye a los alert() nativos).
+  // Se rellena con { title, description, icon, tone, confirmLabel, onConfirm? }
+  const [infoModal, setInfoModal] = useState(null);
+  const showInfo = (cfg) => setInfoModal(cfg);
 
   // Bodegón
   const [bodegonNumber, setBodegonNumber] = useState(1);
@@ -125,7 +131,14 @@ export default function App() {
 
   const handleCreate = () => {
     if (selected.length < 2) {
-      alert('Selecciona al menos 2 productos para crear un bodegón.');
+      showInfo({
+        icon: 'sparkle',
+        tone: 'info',
+        title: 'Selecciona al menos 2 productos',
+        description: 'Para crear un bodegón necesitas elegir como mínimo 2 productos del catálogo.',
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
     const missing = selected.filter(sku => {
@@ -133,11 +146,20 @@ export default function App() {
       return !p || !p.img;
     });
     if (missing.length) {
-      alert(
-        `No se puede generar el bodegón.\n\n` +
-        `${missing.length} producto(s) sin foto: ${missing.join(', ')}.\n\n` +
-        `Edita esos productos y sube una foto antes de incluirlos.`
-      );
+      showInfo({
+        icon: 'upload',
+        tone: 'info',
+        title: 'Algunos productos no tienen foto',
+        description: (
+          <>
+            No se puede generar el bodegón porque <strong>{missing.length} producto{missing.length === 1 ? '' : 's'}</strong> no tiene{missing.length === 1 ? '' : 'n'} foto: <strong>{missing.join(', ')}</strong>.
+            <br/><br/>
+            Edita esos productos y sube una imagen antes de incluirlos.
+          </>
+        ),
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
       return;
     }
     setBodegonTitle(`Bodegón IA #${bodegonNumber}`);
@@ -204,7 +226,14 @@ export default function App() {
       setProducts(ps => ps.filter(p => p.sku !== sku));
       setSelected(s => s.filter(x => x !== sku));
     } catch (e) {
-      alert('Error eliminando producto: ' + e.message);
+      showInfo({
+        icon: 'trash',
+        tone: 'danger',
+        title: 'No se pudo eliminar el producto',
+        description: e.message || 'Error desconocido.',
+        confirmLabel: 'Cerrar',
+        confirmTone: 'neutral',
+      });
     }
   };
 
@@ -274,6 +303,7 @@ export default function App() {
           onCreateProduct={openNew}
           onImport={() => setImportOpen(true)}
           onSpecialOrder={() => setSpecialOrderOpen(true)}
+          onEditProduct={openEdit}
         />
       )}
 
@@ -342,6 +372,26 @@ export default function App() {
           onConfirm={({ items, title, description }) => {
             setEditBodegon(null);
             handleSpecialOrderConfirm({ items, title, description });
+          }}
+          showInfo={showInfo}
+        />
+      )}
+
+      {infoModal && (
+        <ConfirmModal
+          open={true}
+          icon={infoModal.icon}
+          tone={infoModal.tone}
+          title={infoModal.title}
+          description={infoModal.description}
+          cancelLabel={infoModal.cancelLabel ?? null}
+          confirmLabel={infoModal.confirmLabel || 'Entendido'}
+          confirmTone={infoModal.confirmTone || 'neutral'}
+          onCancel={() => setInfoModal(null)}
+          onConfirm={() => {
+            const cb = infoModal.onConfirm;
+            setInfoModal(null);
+            cb && cb();
           }}
         />
       )}

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { I } from './icons.jsx';
 import DownloadModal from './DownloadModal.jsx';
+import ConfirmModal from './ConfirmModal.jsx';
 import { clearAllBodegones } from '../lib/api.js';
 
 const DensityIcon = ({ n }) => {
@@ -55,19 +56,45 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
   const [clearing, setClearing] = useState(false);
   const [zoomedSrc, setZoomedSrc] = useState(null);
   const [editingLightboxTitle, setEditingLightboxTitle] = useState(false);
+  // Diálogos de confirmación
+  const [confirmDel, setConfirmDel] = useState(null);     // bodegón individual a eliminar
+  const [confirmClear, setConfirmClear] = useState(false); // vaciar todo
+  const [infoModal, setInfoModal] = useState(null);        // mensaje informativo (resultado de vaciar)
 
-  const handleClearAll = async () => {
-    if (!confirm('Esto eliminará TODOS los bodegones del historial (también sus imágenes). Esta acción no se puede deshacer. ¿Continuar?')) return;
+  const handleClearAll = () => setConfirmClear(true);
+  const doClearAll = async () => {
+    setConfirmClear(false);
     setClearing(true);
     try {
       const n = await clearAllBodegones();
       onRefresh && (await onRefresh());
-      alert(`✓ ${n} bodegones eliminados.`);
+      setInfoModal({
+        tone: 'info',
+        icon: 'check',
+        title: 'Historial vaciado',
+        description: `Se han eliminado ${n} ${n === 1 ? 'bodegón' : 'bodegones'} del historial.`,
+        confirmLabel: 'Entendido',
+        confirmTone: 'neutral',
+      });
     } catch (e) {
-      alert('Error vaciando historial: ' + e.message);
+      setInfoModal({
+        tone: 'danger',
+        icon: 'trash',
+        title: 'No se pudo vaciar el historial',
+        description: e.message || 'Error desconocido.',
+        confirmLabel: 'Cerrar',
+        confirmTone: 'neutral',
+      });
     } finally {
       setClearing(false);
     }
+  };
+
+  const doDelete = () => {
+    if (!confirmDel) return;
+    const id = confirmDel.id;
+    setConfirmDel(null);
+    onDelete && onDelete(id);
   };
 
   const openDownload = (item) => { setDlBodegon(item); setDlOpen(true); };
@@ -226,7 +253,11 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                       </div>
                     )}
                     <div className="hact" onClick={e => e.stopPropagation()}>
-                      <button className="hbtn danger" title="Eliminar" onClick={()=>onDelete && onDelete(it.id)}>{I.trash({ size: 14 })}</button>
+                      <button
+                        className="hbtn danger"
+                        title="Eliminar"
+                        onClick={(e) => { e.stopPropagation(); setConfirmDel(it); }}
+                      >{I.trash({ size: 14 })}</button>
                       {onEdit && (
                         <button
                           className="hbtn"
@@ -444,6 +475,51 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         bodegon={dlBodegon}
         products={products}
       />
+
+      <ConfirmModal
+        open={!!confirmDel}
+        icon="trash"
+        tone="danger"
+        title="¿Eliminar este bodegón?"
+        description={confirmDel ? (
+          <>Vas a eliminar <strong>{confirmDel.title}</strong>. La imagen también se borrará. Esta acción no se puede deshacer.</>
+        ) : null}
+        cancelLabel="Cancelar"
+        confirmLabel="Eliminar bodegón"
+        confirmTone="danger"
+        onCancel={() => setConfirmDel(null)}
+        onConfirm={doDelete}
+      />
+
+      <ConfirmModal
+        open={confirmClear}
+        icon="trash"
+        tone="danger"
+        title="¿Vaciar todo el historial?"
+        description={(
+          <>Vas a eliminar <strong>{(history || []).length} {(history || []).length === 1 ? 'bodegón' : 'bodegones'}</strong> del historial junto con sus imágenes. Esta acción <strong>no se puede deshacer</strong>.</>
+        )}
+        cancelLabel="Cancelar"
+        confirmLabel="Sí, vaciar historial"
+        confirmTone="danger"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={doClearAll}
+      />
+
+      {infoModal && (
+        <ConfirmModal
+          open={true}
+          icon={infoModal.icon}
+          tone={infoModal.tone}
+          title={infoModal.title}
+          description={infoModal.description}
+          cancelLabel={null}
+          confirmLabel={infoModal.confirmLabel}
+          confirmTone={infoModal.confirmTone}
+          onCancel={() => setInfoModal(null)}
+          onConfirm={() => setInfoModal(null)}
+        />
+      )}
 
       {zoomedSrc && (
         <div
