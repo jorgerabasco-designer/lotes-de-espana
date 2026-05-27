@@ -1,13 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
 import { startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon } from '../lib/api.js';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 import DownloadModal from './DownloadModal.jsx';
 
 export default function BodegonOverlay({
   open, onClose, products, selected, qtys = {},
   title, setTitle, description, setDescription,
+  tags = [], setTags,
   onSaved, onDeleted,
 }) {
+  const { tags: allTags } = useTaxonomy();
+  const toggleTag = (id) => {
+    if (!setTags) return;
+    setTags(tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id]);
+  };
   const [editingTitle, setEditingTitle] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -37,6 +44,7 @@ export default function BodegonOverlay({
         items: itemsWithQty,
         title,
         description: description || '',
+        tags,
       });
       if (created.title) setTitle(created.title);
       const result = await pollBodegon(created.id);
@@ -64,6 +72,7 @@ export default function BodegonOverlay({
       const saved = await commitBodegon(generated.id, {
         nombre: title,
         descripcion: description || null,
+        tags: tags || [],
       });
       setSavedHint(true);
       setTimeout(() => {
@@ -209,6 +218,25 @@ export default function BodegonOverlay({
             rows={4}
           />
 
+          {allTags.length > 0 && setTags && (
+            <>
+              <div className="bo-section-h">Etiquetas del lote</div>
+              <div className="bo-tags">
+                {allTags.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className={`bo-tag ${tags.includes(t.id) ? 'on' : ''}`}
+                    onClick={() => toggleTag(t.id)}
+                  >
+                    {tags.includes(t.id) && I.check({ size: 11 })}
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
           <div className="bo-section-h">Productos ({sel.length})</div>
           <div className="bo-prods">
             {sel.map(p => (
@@ -321,6 +349,12 @@ export default function BodegonOverlay({
         .bo-desc{width:100%;font-family:inherit;font-size:13px;color:var(--ink);line-height:1.55;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 13px;resize:vertical;min-height:78px;outline:none;transition:all .15s}
         .bo-desc:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
         .bo-desc::placeholder{color:var(--muted);font-style:italic}
+
+        .bo-tags{display:flex;flex-wrap:wrap;gap:6px}
+        .bo-tag{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:99px;background:#fff;border:1px solid var(--line);font-size:12px;color:var(--ink-2);font-weight:600;letter-spacing:.01em;transition:all .12s;font-family:inherit;cursor:pointer}
+        .bo-tag:hover{border-color:var(--accent);color:var(--accent)}
+        .bo-tag.on{background:var(--accent);border-color:var(--accent);color:#fff}
+        .bo-tag.on:hover{background:var(--accent-2);color:#fff}
 
         .bo-prods{display:flex;flex-direction:column;gap:6px;flex:1}
         .bo-prod{display:flex;gap:10px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:9px;align-items:center}

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { I } from './icons.jsx';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 
 // Modal de edición de un bodegón existente. Permite:
 //   - Renombrar el bodegón
@@ -30,7 +31,11 @@ export default function BodegonEditOverlay({ bodegon, products, onClose, onConfi
   const [items, setItems] = useState(initialItems);
   const [title, setTitle] = useState(bodegon.title || '');
   const [description, setDescription] = useState(bodegon.description || '');
+  const [tags, setTagsState] = useState(Array.isArray(bodegon.tags) ? bodegon.tags : []);
   const [query, setQuery] = useState('');
+  const { tags: allTags } = useTaxonomy();
+  const toggleTag = (id) =>
+    setTagsState(tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id]);
 
   // Productos disponibles para añadir (los que NO están ya en items y tienen
   // foto, porque sin foto no se puede generar).
@@ -83,6 +88,7 @@ export default function BodegonEditOverlay({ bodegon, products, onClose, onConfi
       items: finalItems,
       title: title || bodegon.title,
       description: description || '',
+      tags: tags || [],
     });
   };
 
@@ -127,6 +133,27 @@ export default function BodegonEditOverlay({ bodegon, products, onClose, onConfi
               />
             </div>
           </div>
+
+          {allTags.length > 0 && (
+            <div className="be-row">
+              <div className="be-field">
+                <label className="be-label">Etiquetas del lote</label>
+                <div className="be-tags">
+                  {allTags.map(t => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`be-tag ${tags.includes(t.id) ? 'on' : ''}`}
+                      onClick={() => toggleTag(t.id)}
+                    >
+                      {tags.includes(t.id) && I.check({ size: 11 })}
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="be-section-h">
             Productos del bodegón
@@ -234,6 +261,12 @@ export default function BodegonEditOverlay({ bodegon, products, onClose, onConfi
           .be-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
           .be-textarea{font-family:inherit;font-size:13px;color:var(--ink);line-height:1.55;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 13px;resize:vertical;min-height:54px;outline:none;transition:all .15s}
           .be-textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+          .be-tags{display:flex;flex-wrap:wrap;gap:6px}
+          .be-tag{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:99px;background:#fff;border:1px solid var(--line);font-size:12px;color:var(--ink-2);font-weight:600;letter-spacing:.01em;transition:all .12s;font-family:inherit;cursor:pointer}
+          .be-tag:hover{border-color:var(--accent);color:var(--accent)}
+          .be-tag.on{background:var(--accent);border-color:var(--accent);color:#fff}
+          .be-tag.on:hover{background:var(--accent-2);color:#fff}
 
           .be-section-h{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:18px 0 8px;display:flex;align-items:center;gap:8px}
           .be-section-c{font-weight:500;letter-spacing:.04em;text-transform:none;font-size:11px;color:var(--muted);background:var(--bg);padding:2px 8px;border-radius:99px}

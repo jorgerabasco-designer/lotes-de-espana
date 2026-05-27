@@ -2,7 +2,16 @@ import React, { useMemo, useState } from 'react';
 import { I } from './icons.jsx';
 import DownloadModal from './DownloadModal.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
+import { useTaxonomy } from '../lib/taxonomy.jsx';
 import { clearAllBodegones } from '../lib/api.js';
+
+function formatSecs(s) {
+  if (!s && s !== 0) return '';
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r ? `${m}m ${r}s` : `${m}m`;
+}
 
 const DensityIcon = ({ n }) => {
   const sz = n <= 4 ? 3.5 : n <= 6 ? 2.2 : 1.5;
@@ -44,6 +53,7 @@ function bucketLabel(d) {
 }
 
 export default function HistoryScreen({ products, history, onRename, onDelete, onRefresh, onEdit }) {
+  const { tagLabels } = useTaxonomy();
   const [range, setRange] = useState('all');
   const [q, setQ] = useState('');
   const [cols, setCols] = useState(() => Number(localStorage.getItem('hist-cols')) || 4);
@@ -225,6 +235,19 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                       <div className="hov-btn"><span>{I.expand({ size: 14 })}</span><span className="hov-btn-l">Ver</span></div>
                     </div>
                     <div className="hthumb-count">{(it.skus || []).length} productos</div>
+                    {it.generation_seconds != null && (
+                      <div className="hthumb-time" title="Tiempo de generación con IA">
+                        {formatSecs(it.generation_seconds)}
+                      </div>
+                    )}
+                    {Array.isArray(it.tags) && it.tags.length > 0 && (
+                      <div className="hthumb-tags">
+                        {it.tags.slice(0, 3).map(t => (
+                          <span key={t} className="hthumb-tag">{tagLabels[t] || t}</span>
+                        ))}
+                        {it.tags.length > 3 && <span className="hthumb-tag more">+{it.tags.length - 3}</span>}
+                      </div>
+                    )}
                   </div>
                   <div className="hbody">
                     {editingId === it.id ? (
@@ -324,8 +347,25 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                   <span className="lb-title-edit">{I.edit({ size: 14 })}</span>
                 </div>
               )}
-              <div className="lb-date">{lightbox.date}</div>
-              {lightbox.description && <div className="lb-desc">{lightbox.description}</div>}
+              <div className="lb-date">
+                {lightbox.date}
+                {lightbox.generation_seconds != null && (
+                  <span className="lb-gen-time"> · generado en {formatSecs(lightbox.generation_seconds)}</span>
+                )}
+              </div>
+              {Array.isArray(lightbox.tags) && lightbox.tags.length > 0 && (
+                <div className="lb-tags">
+                  {lightbox.tags.map(t => (
+                    <span key={t} className="lb-tag">{tagLabels[t] || t}</span>
+                  ))}
+                </div>
+              )}
+              {lightbox.description ? (
+                <>
+                  <div className="lb-section-h">Descripción</div>
+                  <div className="lb-desc">{lightbox.description}</div>
+                </>
+              ) : null}
               <div className="lb-section-h">Productos ({(lightbox.skus || []).length})</div>
               <div className="lb-prods">
                 {(lightbox.skus || []).map(s => {
@@ -406,6 +446,10 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         .hcard:hover .hthumb-overlay{opacity:1}
         .hov-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:99px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2)}
         .hthumb-count{position:absolute;top:10px;left:10px;padding:3px 8px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-radius:99px;font-size:10.5px;font-weight:600;color:var(--ink)}
+        .hthumb-time{position:absolute;top:10px;right:10px;padding:3px 8px;background:rgba(20,16,12,.75);backdrop-filter:blur(6px);border-radius:99px;font-size:10.5px;font-weight:600;color:#fff;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+        .hthumb-tags{position:absolute;bottom:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:4px}
+        .hthumb-tag{padding:2px 8px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-radius:99px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;border:1px solid var(--accent-soft)}
+        .hthumb-tag.more{color:var(--ink-2);background:rgba(255,255,255,.7);border-color:transparent}
 
         .hbody{padding:14px 16px 16px;display:flex;flex-direction:column;flex:1}
         .htitle{font-family:'Fraunces',serif;font-size:16px;font-weight:500;color:var(--ink);letter-spacing:-.005em;line-height:1.25;display:inline-flex;align-items:center;gap:6px;cursor:text;border-radius:5px;padding:1px 4px;margin-left:-4px}
@@ -445,7 +489,10 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         .lb-title-edit{opacity:0;color:var(--muted);transition:opacity .15s;display:inline-grid;place-items:center}
         .lb-title-input{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.01em;background:#fff;border:1.5px solid var(--accent);border-radius:7px;padding:3px 8px;margin-left:-8px;width:calc(100% + 8px);outline:none;box-shadow:0 0 0 4px var(--accent-soft)}
         .lb-date{font-size:12.5px;color:var(--muted);margin-top:4px}
-        .lb-desc{font-size:13px;color:var(--ink-2);margin-top:10px;line-height:1.55}
+        .lb-gen-time{color:var(--ink-2);font-variant-numeric:tabular-nums}
+        .lb-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+        .lb-tag{font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);padding:3px 9px;border-radius:99px}
+        .lb-desc{font-size:13px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 13px;line-height:1.55;white-space:pre-wrap}
         .lb-section-h{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:24px 0 10px}
         .lb-prods{display:flex;flex-direction:column;gap:8px;flex:1}
         .lb-prod{display:flex;gap:10px;padding:8px;background:#fff;border:1px solid var(--line);border-radius:9px;align-items:center}

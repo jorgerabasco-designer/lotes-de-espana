@@ -21,7 +21,7 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
   const [genDescBusy, setGenDescBusy] = useState(false);
   const fileRef = useRef(null);
 
-  const { catOpts, tags: taxTags } = useTaxonomy();
+  const { catOpts } = useTaxonomy();
   const catOptions = useMemo(() => {
     if (!form.cat || catOpts.some(o => o.value === form.cat)) return catOpts;
     return [...catOpts, { value: form.cat, label: form.cat }];
@@ -168,9 +168,9 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
     setBusy(true);
     try {
       let next = { ...form };
-      // Sanear etiquetas: filtrar solo las que existen en la taxonomía actual.
-      const validTagIds = new Set((taxTags || []).map(t => t.id));
-      next.tags = (next.tags || []).filter(t => validTagIds.has(t));
+      // Etiquetas: ya no se gestionan por producto sino por lote. Para no
+      // sobrescribir las que pudiera tener en BD (legacy), las dejamos como
+      // estén en `form` (lo normal: array vacío tras la migración).
 
       if (pendingFile && next.sku) {
         try {
@@ -309,28 +309,8 @@ export default function ProductEditOverlay({ open, product, initialFile, onClose
               />
             </div>
 
-            <div className="section-h">Etiquetas</div>
-            <div className="tag-row">
-              {taxTags.length === 0 && (
-                <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  Aún no hay etiquetas. Añádelas en Configuración → Categorías y tags.
-                </div>
-              )}
-              {taxTags.map(t => {
-                const on = (form.tags || []).includes(t.id);
-                return (
-                  <button
-                    type="button"
-                    key={t.id}
-                    className={`tagpill ${on ? 'on' : ''}`}
-                    onClick={() => {
-                      const cur = form.tags || [];
-                      upd('tags', on ? cur.filter(x => x !== t.id) : [...cur, t.id]);
-                    }}
-                  >{t.label}</button>
-                );
-              })}
-            </div>
+            {/* Las etiquetas (Sin gluten, Vegano, Halal…) ya no son de
+                producto: se asignan al LOTE al crear el bodegón. */}
 
             <div className="section-h-row">
               <div className="section-h">Descripción visual (para el prompt de IA)</div>

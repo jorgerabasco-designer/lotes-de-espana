@@ -59,10 +59,16 @@ CREATE TABLE IF NOT EXISTS bodegones (
   estado TEXT DEFAULT 'generating' CHECK (estado IN ('generating', 'draft', 'completed', 'failed')),
   prompt_usado TEXT,
   error_mensaje TEXT,
+  tags TEXT[] DEFAULT '{}',                -- etiquetas del LOTE (sin gluten, vegano…)
+  generation_seconds INTEGER,              -- cuánto tardó Gemini en generar
   created_at TIMESTAMPTZ DEFAULT NOW(),
 
   CONSTRAINT bodegon_ref_format CHECK (ref ~ '^[0-9]{2}[A-Z]{2}[0-9]{3}$')
 );
+
+-- Si la tabla bodegones ya existía sin estas columnas, las añadimos.
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS generation_seconds INTEGER;
 
 -- Si la tabla ya existe con un constraint sin 'draft', actualízalo.
 DO $$

@@ -190,8 +190,8 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
               <div className="tax-divider"/>
 
               <TaxonomyEditor
-                title="Etiquetas"
-                subtitle="Atributos rápidos como Bio, Vegano o Sin gluten que se asignan a cada producto."
+                title="Etiquetas de lote"
+                subtitle="Atributos como Sin gluten, Vegano o Halal que se asignan al lote completo al crear o editar el bodegón."
                 items={tax.tags}
                 count={tagCount}
                 onAdd={tax.addTag}

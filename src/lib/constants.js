@@ -12,10 +12,15 @@ export const DEFAULT_CATEGORIES = [
   { id: 'charcuteria',  label: 'Charcutería' },
 ];
 
+// Etiquetas DE LOTE (no de producto). Se asignan al bodegón al crearlo o
+// editarlo, no a cada producto. Esto permite, p. ej., armar lotes "Sin gluten"
+// o "Halal" sin marcar uno a uno los productos.
 export const DEFAULT_TAGS = [
+  { id: 'sin-gluten',  label: 'Sin gluten' },
   { id: 'vegano',      label: 'Vegano' },
   { id: 'bio',         label: 'Bio' },
-  { id: 'sin-gluten',  label: 'Sin gluten' },
+  { id: 'halal',       label: 'Halal' },
+  { id: 'sin-alcohol', label: 'Sin alcohol' },
   { id: 'con-alcohol', label: 'Con alcohol' },
   { id: 'artesano',    label: 'Artesano' },
 ];

@@ -10,13 +10,17 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Lista de modelos a probar en orden. Si la env var GEMINI_IMAGE_MODEL está definida, va primero.
-// Orden actualizado: PRO primero (máxima calidad), luego Flash. gemini-2.5-flash-image-preview
-// ya no existe (Google lo deprecó) — no lo incluimos.
+//
+// Orden: FLASH primero (rápido, ~30-90s con bodegones de 20-30 productos).
+// PRO al final, sólo si fallan los Flash. Pro es ~3-5x más lento cuando hay
+// muchas imágenes de referencia y se nos iba a >300s, que es inaceptable.
+// Si la calidad de Flash no convence en algún caso, basta con poner
+// `GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` en Netlify env vars.
 const MODEL_FALLBACKS = [
   process.env.GEMINI_IMAGE_MODEL,
-  'gemini-3-pro-image-preview',     // Máxima calidad fotorealista
-  'gemini-3.1-flash-image-preview', // Más rápido, balance calidad/coste
-  'gemini-2.5-flash-image',         // Estable, fallback
+  'gemini-3.1-flash-image-preview', // Rápido, calidad/coste balanceados — DEFAULT
+  'gemini-2.5-flash-image',         // Flash estable, fallback
+  'gemini-3-pro-image-preview',     // Máxima calidad pero lento, último recurso
 ].filter(Boolean);
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
@@ -192,6 +196,9 @@ export const handler = async (event) => {
   const { ref } = body;
   if (!ref) return json(400, { error: 'Falta el campo "ref" del bodegón.' });
 
+  // Cronómetro para registrar cuánto tarda toda la generación.
+  const t0 = Date.now();
+
   const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
 
   // 1) Cargar la fila del bodegón
@@ -266,18 +273,23 @@ export const handler = async (event) => {
   // Guardar el prompt usado (para referencia) y mantener estado 'generating'
   await supabase.from('bodegones').update({ prompt_usado: prompt }).eq('ref', ref);
 
-  // 5) Descargar imágenes de referencia EN EL MISMO ORDEN que el bloque de
-  // texto, para que "PRODUCT #N — REFERENCE IMAGE #N" mapee correctamente.
-  const refImages = [];
-  for (const r of sortedProducts) {
+  // 5) Descargar imágenes de referencia EN PARALELO. Antes eran secuenciales y
+  // con 20+ productos suponía 10-15s extra de espera. Ahora Promise.all las
+  // baja a 1-2s. Mantenemos el ORDEN ORIGINAL para que "PRODUCT #N —
+  // REFERENCE IMAGE #N" siga mapeando correctamente.
+  const tImg0 = Date.now();
+  const refResults = await Promise.all(sortedProducts.map(async (r) => {
     try {
       const { data } = supabase.storage.from('productos').getPublicUrl(r.foto_path);
       const inline = await fetchAsBase64(data.publicUrl);
-      refImages.push(inline);
+      return inline;
     } catch (e) {
       console.warn('Sin imagen para', r.ref, e.message);
+      return null;
     }
-  }
+  }));
+  const refImages = refResults.filter(Boolean);
+  console.log(`[Gemini] descarga de ${refImages.length} imágenes en ${((Date.now() - tImg0) / 1000).toFixed(1)}s`);
 
   // 6) Llamar a Gemini — probamos cada modelo con varias configs hasta dar con la buena
   const FN_VERSION = 'v3-2026-05-09';
@@ -377,7 +389,10 @@ export const handler = async (event) => {
     }
 
     console.error('[Gemini] FAILED — todos los modelos:', allErrors);
-    await supabase.from('bodegones').update({ estado: 'failed', error_mensaje: msg }).eq('ref', ref);
+    const seconds = Math.round((Date.now() - t0) / 1000);
+    await supabase.from('bodegones')
+      .update({ estado: 'failed', error_mensaje: msg, generation_seconds: seconds })
+      .eq('ref', ref);
     return json(500, { error: msg });
   }
 
@@ -393,15 +408,18 @@ export const handler = async (event) => {
     return json(500, { error: 'Error guardando imagen: ' + upErr.message });
   }
 
-  // 8) Marcar como 'draft' (generación lista, esperando que el usuario pulse "Guardar en historial")
+  // 8) Marcar como 'draft' (generación lista, esperando que el usuario pulse
+  //    "Guardar en historial") y guardar el tiempo total que ha llevado.
+  const seconds = Math.round((Date.now() - t0) / 1000);
+  console.log(`[Gemini] ✓ Bodegón ${ref} listo en ${seconds}s (modelo: ${usedModel})`);
   await supabase
     .from('bodegones')
-    .update({ estado: 'draft', imagen_path: path })
+    .update({ estado: 'draft', imagen_path: path, generation_seconds: seconds })
     .eq('ref', ref);
 
   // En background functions Netlify NO entrega esta respuesta al cliente — el
   // frontend hace polling sobre la fila de Supabase. Devolvemos OK por completitud.
-  return json(200, { ok: true, ref, image_path: path });
+  return json(200, { ok: true, ref, image_path: path, seconds });
 };
 
 async function markFailed(supabase, ref, msg) {

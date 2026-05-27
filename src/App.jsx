@@ -52,6 +52,7 @@ export default function App() {
   const [bodegonNumber, setBodegonNumber] = useState(1);
   const [bodegonTitle, setBodegonTitle] = useState('');
   const [bodegonDesc, setBodegonDesc] = useState('');
+  const [bodegonTags, setBodegonTags] = useState([]); // etiquetas del lote (sin gluten, vegano…)
   const [bodegonOpen, setBodegonOpen] = useState(false);
 
   // Initial load
@@ -116,8 +117,9 @@ export default function App() {
   };
   const clearSel = () => { setSelected([]); setQtys({}); };
 
-  // Llamado desde SpecialOrderModal: precarga selección y lanza el overlay.
-  const handleSpecialOrderConfirm = ({ items, title, description }) => {
+  // Llamado desde SpecialOrderModal y BodegonEditOverlay: precarga selección,
+  // título, descripción y etiquetas y lanza el overlay de generación.
+  const handleSpecialOrderConfirm = ({ items, title, description, tags }) => {
     if (!items || !items.length) return;
     const skus = items.map(i => i.sku);
     const qtyMap = Object.fromEntries(items.map(i => [i.sku, i.qty || 1]));
@@ -125,6 +127,7 @@ export default function App() {
     setQtys(qtyMap);
     setBodegonTitle(title || `Bodegón IA #${bodegonNumber}`);
     setBodegonDesc(description || '');
+    setBodegonTags(Array.isArray(tags) ? tags : []);
     setSpecialOrderOpen(false);
     setBodegonOpen(true);
   };
@@ -164,6 +167,7 @@ export default function App() {
     }
     setBodegonTitle(`Bodegón IA #${bodegonNumber}`);
     setBodegonDesc('');
+    setBodegonTags([]);
     setBodegonOpen(true);
   };
 
@@ -355,6 +359,7 @@ export default function App() {
         qtys={qtys}
         title={bodegonTitle} setTitle={setBodegonTitle}
         description={bodegonDesc} setDescription={setBodegonDesc}
+        tags={bodegonTags} setTags={setBodegonTags}
         onSaved={handleSavedBodegon}
         onDeleted={handleDeletedBodegon}
       />

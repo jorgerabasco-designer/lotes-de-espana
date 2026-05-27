@@ -181,6 +181,8 @@ function rowToBodegon(row) {
       : null,
     image_path: row.imagen_path,
     estado: row.estado,
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    generation_seconds: row.generation_seconds ?? null,
     created_at: row.created_at,
   };
 }
@@ -404,7 +406,8 @@ async function nextBodegonNumber() {
 
 // items: [{ sku, qty }]. Se acepta también `skus` (array de strings) por
 // compatibilidad — se convierte a qty 1 cada uno.
-export async function startBodegonGeneration({ items, skus, title, description }) {
+// `tags`: array de ids de etiquetas que aplicar al lote (sin gluten, vegano…).
+export async function startBodegonGeneration({ items, skus, title, description, tags }) {
   if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
 
   let normItems = [];
@@ -418,6 +421,7 @@ export async function startBodegonGeneration({ items, skus, title, description }
   const ref = newBodegonRef();
   const numero = await nextBodegonNumber();
   const finalTitle = title || `Bodegón IA #${numero}`;
+  const finalTags = Array.isArray(tags) ? tags : [];
 
   const { error: insErr } = await supabase.from('bodegones').insert({
     ref,
@@ -425,6 +429,7 @@ export async function startBodegonGeneration({ items, skus, title, description }
     nombre: finalTitle,
     descripcion: description || null,
     productos: normItems,            // [{sku, qty}]
+    tags: finalTags,
     estado: 'generating',
   });
   if (insErr) throw new Error('No se pudo registrar el bodegón: ' + insErr.message);
@@ -437,10 +442,13 @@ export async function startBodegonGeneration({ items, skus, title, description }
     body: JSON.stringify({ ref }),
   }).catch(e => console.warn('Trigger background:', e));
 
-  return { id: ref, n: numero, title: finalTitle, description, items: normItems, skus: normItems.map(i => i.sku) };
+  return { id: ref, n: numero, title: finalTitle, description, tags: finalTags, items: normItems, skus: normItems.map(i => i.sku) };
 }
 
-export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 5 * 60 * 1000, onTick } = {}) {
+// Timeout subido a 10 min. La función Netlify tiene 15 min, y aunque el
+// objetivo realista con Flash + paralelización está por debajo de 60s,
+// queremos sobrevivir si Gemini se atasca puntualmente.
+export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 10 * 60 * 1000, onTick } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const { data, error } = await supabase

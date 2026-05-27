@@ -143,16 +143,8 @@ export default function Catalog({
                 ))}
               </div>
 
-              {allTags.length > 0 && (
-                <>
-                  <div className="filter-label">Etiquetas</div>
-                  <div className="pill-row">
-                    {allTags.map(t => (
-                      <button key={t.id} className={`spill stag ${tags.includes(t.id) ? 'on' : ''}`} onClick={() => toggleTag(t.id)}>{t.label}</button>
-                    ))}
-                  </div>
-                </>
-              )}
+              {/* Las etiquetas (Sin gluten, Vegano…) ya no se filtran a nivel
+                  de producto: ahora son del LOTE. */}
 
               {brands.length > 0 && (
                 <>
@@ -322,7 +314,7 @@ export default function Catalog({
 }
 
 function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove, onNoPhoto }) {
-  const { catLabels, tagLabels } = useTaxonomy();
+  const { catLabels } = useTaxonomy();
   const catLabel = catLabels[p.cat] || p.cat;
   const noPhoto = !p.img;
   const [bump, setBump] = React.useState(false);
@@ -418,18 +410,8 @@ function ProductCard({ p, sel, qty = 0, onToggle, onAdd, onRemove, onNoPhoto }) 
             <span className="psku">{p.sku}</span>
           </div>
         </div>
-        {(() => {
-          // Renderizamos siempre el contenedor (aunque esté vacío) para reservar
-          // su altura y mantener todas las cards alineadas en el grid.
-          const validTags = (p.tags || []).filter(t => tagLabels[t]);
-          return (
-            <div className="ptag-row" aria-hidden={validTags.length === 0 ? 'true' : undefined}>
-              {validTags.slice(0, 3).map(t => (
-                <span key={t} className="ptag">{tagLabels[t]}</span>
-              ))}
-            </div>
-          );
-        })()}
+        {/* Las etiquetas (sin gluten, vegano…) ya no son de producto;
+            se asignan al LOTE en el momento de crearlo. */}
       </div>
       <style>{`
         .pcard{position:relative;background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;cursor:pointer;transition:all .2s cubic-bezier(.2,.8,.2,1);overflow:hidden;text-align:left;width:100%;display:block;-webkit-tap-highlight-color:transparent}

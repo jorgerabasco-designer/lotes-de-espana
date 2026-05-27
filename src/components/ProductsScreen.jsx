@@ -1,26 +1,65 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { I } from './icons.jsx';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
+
+const PAGE_SIZE = 25;
 
 export default function ProductsScreen({ products, onEdit, onDelete, onNew, onImport }) {
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [confirmDel, setConfirmDel] = useState(null);
+  // Paginación incremental: empezamos mostrando PAGE_SIZE; al llegar al final
+  // del listado cargamos otros PAGE_SIZE (IntersectionObserver más abajo).
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  const { categories, catLabels, tagLabels } = useTaxonomy();
+  const screenRef = useRef(null);
+  const sentinelRef = useRef(null);
+
+  const { categories, catLabels } = useTaxonomy();
   const cats = [{ id: 'all', label: 'Todos' }, ...categories.map(c => ({ id: c.id, label: c.label }))];
   const filtered = products.filter(p => {
     if (cat !== 'all' && p.cat !== cat) return false;
     if (q && !(p.name + p.brand + p.sku).toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
+  const visibleProducts = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
+  // Cada vez que cambia el filtro / la búsqueda volvemos al principio.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+    if (screenRef.current) screenRef.current.scrollTop = 0;
+  }, [cat, q]);
+
+  // Carga automática al ver el sentinel cerca del fondo.
+  useEffect(() => {
+    if (!hasMore) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const root = screenRef.current || null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setVisibleCount(v => Math.min(v + PAGE_SIZE, filtered.length));
+        }
+      },
+      { root, rootMargin: '120px 0px' }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, filtered.length]);
 
   return (
-    <section className="screen">
+    <section className="screen" ref={screenRef}>
       <header className="cat-head">
         <div>
           <h1 className="cat-title">Productos</h1>
-          <p className="cat-sub">Gestión completa de tu catálogo · {products.length} productos</p>
+          <p className="cat-sub">
+            Gestión completa de tu catálogo · {products.length} productos
+            {filtered.length !== products.length && (
+              <> · <strong>{filtered.length}</strong> en este filtro</>
+            )}
+          </p>
         </div>
         <div className="screen-head-r">
           <button className="btn btn-special" onClick={onImport}>{I.upload({ size: 16 })} Importar productos</button>
@@ -47,11 +86,10 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
           <div className="pc-name">Producto</div>
           <div className="pc-sku">Referencia</div>
           <div className="pc-cat">Categoría</div>
-          <div className="pc-tags">Etiquetas</div>
           <div className="pc-dim">Dimensiones</div>
           <div className="pc-act"></div>
         </div>
-        {filtered.map(p => (
+        {visibleProducts.map(p => (
           <div key={p.sku} className="prow prow-clickable" onClick={() => onEdit(p)}>
             <div className="pc-img">
               <div className="pc-thumb">{p.img ? <img src={p.img} alt=""/> : null}</div>
@@ -62,19 +100,6 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
             </div>
             <div className="pc-sku mono">{p.sku}</div>
             <div className="pc-cat"><span className="cat-tag">{catLabels[p.cat] || p.cat}</span></div>
-            <div className="pc-tags">
-              {(() => {
-                const validTags = (p.tags || []).filter(t => tagLabels[t]);
-                return (
-                  <>
-                    {validTags.slice(0, 3).map(t => (
-                      <span key={t} className="row-tag">{tagLabels[t]}</span>
-                    ))}
-                    {validTags.length > 3 && <span className="row-tag more">+{validTags.length - 3}</span>}
-                  </>
-                );
-              })()}
-            </div>
             <div className="pc-dim mono">{p.h}×{p.w}×{p.d} cm</div>
             <div className="pc-act">
               <button className="iconbtn-l danger" onClick={(e) => { e.stopPropagation(); setConfirmDel(p); }} title="Eliminar">{I.trash({ size: 15 })}</button>
@@ -84,6 +109,17 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
         {filtered.length === 0 && (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>
             No hay productos que coincidan con tu búsqueda.
+          </div>
+        )}
+        {hasMore && (
+          <div ref={sentinelRef} className="prow-load">
+            <div className="prow-load-spin"/>
+            <span>Cargando más productos… ({visibleCount} de {filtered.length})</span>
+          </div>
+        )}
+        {!hasMore && filtered.length > PAGE_SIZE && (
+          <div className="prow-end">
+            Mostrando los {filtered.length} productos.
           </div>
         )}
       </div>
@@ -103,7 +139,7 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
       )}
 
       <style>{`
-        .screen{flex:1;min-width:0;padding:38px 56px 56px 64px;display:flex;flex-direction:column;gap:22px;overflow-y:auto;height:100vh;width:100%}
+        .screen{flex:1;min-width:0;padding:38px 56px 56px 64px;display:flex;flex-direction:column;gap:22px;overflow-y:auto;overflow-x:hidden;height:100vh;max-height:100vh;width:100%;scrollbar-gutter:stable}
         .cat-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}
         .cat-title{font-family:'Fraunces',serif;font-weight:400;font-size:46px;line-height:1;letter-spacing:-.02em;color:var(--ink);margin:0}
         .cat-sub{margin:12px 0 0;color:var(--muted);font-size:14px;line-height:1.55}
@@ -125,8 +161,12 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
         .chip:hover{background:#fff;color:var(--ink)}
         .chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 
-        .ptable{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
-        .prow{display:grid;grid-template-columns:72px 1.5fr .9fr .9fr 1.2fr .9fr 80px;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);transition:background .12s}
+        .ptable{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;flex-shrink:0}
+        .prow-load{display:flex;align-items:center;justify-content:center;gap:10px;padding:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;background:#FAFAF7}
+        .prow-load-spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:plspin .8s linear infinite}
+        @keyframes plspin{to{transform:rotate(360deg)}}
+        .prow-end{padding:14px;text-align:center;border-top:1px solid var(--line);color:var(--muted);font-size:11.5px;background:#FAFAF7;letter-spacing:.02em}
+        .prow{display:grid;grid-template-columns:72px 1.8fr 1fr 1fr 1.1fr 80px;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);transition:background .12s}
         .prow:last-child{border-bottom:none}
         .prow:not(.phead):hover{background:#FAFAF7}
         .phead{background:#FAFAF7;padding:10px 16px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line)}
@@ -134,8 +174,7 @@ export default function ProductsScreen({ products, onEdit, onDelete, onNew, onIm
         .row-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);font-weight:600;background:var(--bg);border:1px solid var(--line);padding:3px 7px;border-radius:99px;white-space:nowrap}
         .row-tag.more{background:transparent;color:var(--muted)}
         @media (max-width: 1100px){
-          .prow{grid-template-columns:60px 1.4fr .9fr .9fr .9fr 80px}
-          .pc-tags{display:none}
+          .prow{grid-template-columns:60px 1.6fr 1fr 1fr 1fr 80px}
         }
         .pc-thumb{width:52px;height:52px;border-radius:10px;background:#fff;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px}
         .pc-thumb img{width:100%;height:100%;object-fit:contain;object-position:center}

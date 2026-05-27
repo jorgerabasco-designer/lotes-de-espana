@@ -52,16 +52,8 @@ export default function Sidebar({
             ))}
           </div>
 
-          {allTags.length > 0 && (
-            <>
-              <div className="filter-label">Etiquetas</div>
-              <div className="pill-row">
-                {allTags.map(t => (
-                  <button key={t.id} className={`spill stag ${tags.includes(t.id) ? 'on' : ''}`} onClick={() => toggleTag(t.id)}>{t.label}</button>
-                ))}
-              </div>
-            </>
-          )}
+          {/* Las etiquetas (Sin gluten, Vegano…) ya no son de producto:
+              ahora se asignan al LOTE en el momento de crearlo. */}
 
           {brands.length > 0 && (
             <>
