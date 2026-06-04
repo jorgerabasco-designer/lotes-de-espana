@@ -16,18 +16,21 @@ const MODEL_FLASH = [
 ];
 
 // Orden de modelos según la calidad elegida en Configuración (settings.image_quality):
-//   'quality' (por defecto) → Pro primero, Flash como fallback. Máxima fidelidad de
-//                             etiquetas y orientación; más lento (2-4 min con 20-30
-//                             productos), pero ya no falla por timeout gracias a las
-//                             descargas en paralelo + poll de 10 min.
-//   'fast'                  → Flash primero, Pro como último recurso. ~30s pero a
-//                             veces tumba botellas o cambia etiquetas.
+//   'quality' (por defecto) → SOLO Pro. SIN fallback a Flash. Si Pro falla, devolvemos
+//                             error claro al usuario. Decisión deliberada: Flash genera
+//                             resultados que "parecen casi bien" pero con etiquetas o
+//                             cantidades equivocadas, lo cual es peor que un error
+//                             explícito (el usuario puede reintentar o cambiar a
+//                             Rápido). 2-4 min con 20-30 productos.
+//   'fast'                  → Flash primero, Pro como último recurso si Flash falla.
+//                             ~30s pero a veces tumba botellas o confunde productos.
 // La env var GEMINI_IMAGE_MODEL, si está definida, va siempre primero.
 function modelOrder(quality) {
-  const base = quality === 'fast'
-    ? [...MODEL_FLASH, MODEL_PRO]
-    : [MODEL_PRO, ...MODEL_FLASH];
-  return [process.env.GEMINI_IMAGE_MODEL, ...base].filter(Boolean);
+  if (quality === 'fast') {
+    return [process.env.GEMINI_IMAGE_MODEL, ...MODEL_FLASH, MODEL_PRO].filter(Boolean);
+  }
+  // quality === 'quality': estricto, solo Pro.
+  return [process.env.GEMINI_IMAGE_MODEL, MODEL_PRO].filter(Boolean);
 }
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
@@ -138,20 +141,48 @@ LABEL & BRAND FIDELITY (most common serious error — avoid it):
 // Reglas de cantidad — se concatenan SIEMPRE al prompt final, venga el
 // template de Supabase o del DEFAULT. Garantiza que el modelo respete las
 // unidades aunque el prompt configurado por el usuario no las mencione.
+// Versión REFORZADA (mayo 2026) tras un fallo donde el modelo duplicó un
+// producto (NOS aceite ×2) en lugar del que estaba marcado como ×2 (Siderit).
 const QUANTITY_RULES = `
 ================================================================
-UNIT COUNT — STRICT, NON-NEGOTIABLE
+UNIT COUNT — MOST IMPORTANT RULE OF THE WHOLE PROMPT
 ================================================================
-Each product in the list has a "QUANTITY" field. You MUST include
-each product EXACTLY the number of units stated in its QUANTITY —
-no more, no less.
-- QUANTITY 1 (the usual case): show ONE single unit of that product.
-  NEVER add a second copy of a QUANTITY-1 product.
-- QUANTITY 2 or more: show exactly that many identical copies of the
-  SAME product, grouped together side by side.
-The whole composition must contain EXACTLY {N} product units in total.
-Count them before finishing. Wrong unit counts are the most common
-and most serious error — do not make it.`;
+Each PRODUCT #N in the list above corresponds to REFERENCE IMAGE #N
+attached to this request. The QUANTITY field of PRODUCT #N applies
+ONLY to that specific product (matching that specific reference
+image). It NEVER applies to a different product, even if both look
+similar (e.g., two different bottles).
+
+You MUST include each product EXACTLY the number of units stated in
+its own QUANTITY — no more, no less:
+- QUANTITY 1 → exactly ONE single unit of that specific product.
+  NEVER duplicate a QUANTITY-1 product. NEVER add a "second one" of
+  any QUANTITY-1 product, even by accident.
+- QUANTITY 2, 3, etc. → exactly that many IDENTICAL copies of the
+  SAME product (same brand, same label, same colour, exactly matching
+  its reference image), placed grouped side by side.
+
+CRITICAL ERRORS TO AVOID — do NOT do any of these:
+× Showing 2 units of PRODUCT A when its QUANTITY was 1.
+× Showing 1 unit of PRODUCT B when its QUANTITY was 2.
+× "Borrowing" a unit from product B and giving it to product A
+  because the total looked right. Counts are per-product, not
+  global swapping.
+× Doubling a bottle that looks similar to another bottle (e.g.,
+  showing two olive-oil bottles because there were "two bottles" in
+  total, when actually one was olive oil ×1 and another was gin ×2).
+
+BEFORE OUTPUTTING THE IMAGE — MANDATORY TALLY:
+1. Read the QUANTITY of every PRODUCT #N in the list.
+2. Mentally count how many units of EACH product appear in your
+   composition.
+3. For every product, the count in the image must equal its QUANTITY.
+4. The total number of visible product units must equal EXACTLY {N}.
+5. If any per-product count is wrong, rebuild the composition. Do NOT
+   output an image with wrong per-product counts.
+
+Wrong per-product counts are the single most common error and the
+single most damaging one for the customer — do not make it.`;
 
 function placeFor(product) {
   // Si el producto trae posición explícita, respetarla. Si no, derivarla por altura.
@@ -434,8 +465,11 @@ export const handler = async (event) => {
         'Para 100 bodegones al mes con Pro = ~$4 USD.';
     } else {
       const detail = allErrors.map(e => `• ${e.model} [${e.variant}]: ${e.error}`).join('\n');
-      msg = `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle:\n${detail}`;
-      if (availableImageModels.length) {
+      const strictPro = quality === 'quality';
+      msg = strictPro
+        ? `Gemini 3 Pro no consiguió generar la imagen esta vez. Te lo decimos en vez de caer a Flash silenciosamente, porque querías máxima calidad.\n\nQué hacer:\n• Pulsa Regenerar — los errores transitorios de Pro son frecuentes.\n• Si sigue fallando, ve a Configuración → Calidad de imagen → Rápido para generar con Flash (peor calidad pero suele funcionar).\n\nDetalle técnico:\n${detail}`
+        : `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle:\n${detail}`;
+      if (availableImageModels.length && !strictPro) {
         msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
       }
     }
