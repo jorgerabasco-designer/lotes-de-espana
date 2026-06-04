@@ -129,7 +129,11 @@ export default function BodegonOverlay({
                   {elapsed < 8 && 'Construyendo el prompt y enviando referencias'}
                   {elapsed >= 8 && elapsed < 25 && 'Componiendo la pirámide TRASERA → MEDIA → DELANTERA'}
                   {elapsed >= 25 && elapsed < 60 && 'Aplicando iluminación de estudio y sombras'}
-                  {elapsed >= 60 && 'Casi listo · ' + elapsed + 's'}
+                  {elapsed >= 60 && elapsed < 120 && 'Cuidando los detalles de cada etiqueta…'}
+                  {elapsed >= 120 && elapsed < 180 && 'Pro está siendo muy fiel — esto suele tardar 2-4 min'}
+                  {elapsed >= 180 && elapsed < 300 && 'Más de 3 min. Pro hoy va lento; sigue trabajando.'}
+                  {elapsed >= 300 && elapsed < 420 && 'Más de 5 min. Si pasa de 7-8, vuelve a Regenerar.'}
+                  {elapsed >= 420 && 'Está tardando demasiado. Considera Regenerar o cambiar a Rápido en Configuración.'}
                 </div>
                 {elapsed > 0 && <div className="bo-loading-sub" style={{opacity:.6,marginTop:4}}>{elapsed}s</div>}
               </div>
