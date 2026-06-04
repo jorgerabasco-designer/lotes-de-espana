@@ -183,6 +183,7 @@ function rowToBodegon(row) {
     estado: row.estado,
     tags: Array.isArray(row.tags) ? row.tags : [],
     generation_seconds: row.generation_seconds ?? null,
+    modelo_usado: row.modelo_usado || null,
     created_at: row.created_at,
   };
 }

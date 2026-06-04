@@ -13,6 +13,17 @@ function formatSecs(s) {
   return r ? `${m}m ${r}s` : `${m}m`;
 }
 
+// Etiqueta corta del modelo para mostrar en la card / lightbox.
+// 'gemini-3-pro-image-preview' → 'Pro'
+// 'gemini-3.1-flash-image-preview' / 'gemini-2.5-flash-image' → 'Flash'
+function modelLabel(name) {
+  if (!name) return null;
+  const n = String(name).toLowerCase();
+  if (n.includes('pro')) return 'Pro';
+  if (n.includes('flash')) return 'Flash';
+  return name;
+}
+
 const DensityIcon = ({ n }) => {
   const sz = n <= 4 ? 3.5 : n <= 6 ? 2.2 : 1.5;
   const gap = n <= 4 ? 1.4 : n <= 6 ? 1 : 0.7;
@@ -236,8 +247,9 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
                     </div>
                     <div className="hthumb-count">{(it.skus || []).length} productos</div>
                     {it.generation_seconds != null && (
-                      <div className="hthumb-time" title="Tiempo de generación con IA">
+                      <div className="hthumb-time" title={`Generado en ${formatSecs(it.generation_seconds)}${it.modelo_usado ? ` con ${it.modelo_usado}` : ''}`}>
                         {formatSecs(it.generation_seconds)}
+                        {modelLabel(it.modelo_usado) && <span className={`hthumb-model ${modelLabel(it.modelo_usado).toLowerCase()}`}>{modelLabel(it.modelo_usado)}</span>}
                       </div>
                     )}
                     {Array.isArray(it.tags) && it.tags.length > 0 && (
@@ -350,7 +362,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
               <div className="lb-date">
                 {lightbox.date}
                 {lightbox.generation_seconds != null && (
-                  <span className="lb-gen-time"> · generado en {formatSecs(lightbox.generation_seconds)}</span>
+                  <span className="lb-gen-time"> · generado en {formatSecs(lightbox.generation_seconds)}{modelLabel(lightbox.modelo_usado) && ` con Gemini ${modelLabel(lightbox.modelo_usado)}`}</span>
                 )}
               </div>
               {Array.isArray(lightbox.tags) && lightbox.tags.length > 0 && (
@@ -446,7 +458,10 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         .hcard:hover .hthumb-overlay{opacity:1}
         .hov-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:99px;background:#fff;color:var(--ink);font-size:12px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,.2)}
         .hthumb-count{position:absolute;top:10px;left:10px;padding:3px 8px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-radius:99px;font-size:10.5px;font-weight:600;color:var(--ink)}
-        .hthumb-time{position:absolute;top:10px;right:10px;padding:3px 8px;background:rgba(20,16,12,.75);backdrop-filter:blur(6px);border-radius:99px;font-size:10.5px;font-weight:600;color:#fff;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+        .hthumb-time{position:absolute;top:10px;right:10px;padding:3px 8px;background:rgba(20,16,12,.75);backdrop-filter:blur(6px);border-radius:99px;font-size:10.5px;font-weight:600;color:#fff;letter-spacing:.02em;font-variant-numeric:tabular-nums;display:inline-flex;align-items:center;gap:5px}
+        .hthumb-model{padding:1px 6px;border-radius:99px;font-size:9px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;background:#fff;color:var(--ink)}
+        .hthumb-model.pro{background:var(--accent);color:#fff}
+        .hthumb-model.flash{background:#EAB23E;color:#3a2c0e}
         .hthumb-tags{position:absolute;bottom:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:4px}
         .hthumb-tag{padding:2px 8px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-radius:99px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;border:1px solid var(--accent-soft)}
         .hthumb-tag.more{color:var(--ink-2);background:rgba(255,255,255,.7);border-color:transparent}

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS bodegones (
 -- Si la tabla bodegones ya existía sin estas columnas, las añadimos.
 ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
 ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS generation_seconds INTEGER;
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS modelo_usado TEXT;
 
 -- Si la tabla ya existe con un constraint sin 'draft', actualízalo.
 DO $$

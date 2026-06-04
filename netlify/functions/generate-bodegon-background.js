@@ -461,12 +461,17 @@ export const handler = async (event) => {
   }
 
   // 8) Marcar como 'draft' (generación lista, esperando que el usuario pulse
-  //    "Guardar en historial") y guardar el tiempo total que ha llevado.
+  //    "Guardar en historial"). Guardamos también:
+  //      · generation_seconds → cuánto tardó toda la generación
+  //      · modelo_usado       → qué modelo de Gemini logró la imagen
+  //                             (sirve para auditar si Pro hizo de fallback a
+  //                             Flash sin que el usuario lo viera).
   const seconds = Math.round((Date.now() - t0) / 1000);
+  const modeloUsado = usedModel ? usedModel.split(' (')[0] : null;
   console.log(`[Gemini] ✓ Bodegón ${ref} listo en ${seconds}s (modelo: ${usedModel})`);
   await supabase
     .from('bodegones')
-    .update({ estado: 'draft', imagen_path: path, generation_seconds: seconds })
+    .update({ estado: 'draft', imagen_path: path, generation_seconds: seconds, modelo_usado: modeloUsado })
     .eq('ref', ref);
 
   // En background functions Netlify NO entrega esta respuesta al cliente — el
