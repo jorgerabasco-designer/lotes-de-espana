@@ -86,15 +86,17 @@ export default function BodegonOverlay({
     <div className="bo-back">
       <div className="bo-modal" onClick={e => e.stopPropagation()}>
         <button
-          className="bo-close"
-          onClick={onMinimize}
-          title="Minimizar — la generación sigue en segundo plano"
-        >{I.close({ size: 18 })}</button>
-        <button
           className="bo-minimize"
           onClick={onMinimize}
           title="Minimizar — sigue trabajando mientras Pro genera"
-        >Minimizar</button>
+          aria-label="Minimizar"
+        >{I.minimize({ size: 18 })}</button>
+        <button
+          className="bo-close"
+          onClick={onMinimize}
+          title="Cerrar (la generación sigue en segundo plano)"
+          aria-label="Cerrar"
+        >{I.close({ size: 18 })}</button>
 
         <div className="bo-stage-wrap">
           <div className={`bo-stage ${generating ? 'busy' : ''}`}>
@@ -281,10 +283,10 @@ export default function BodegonOverlay({
       <style>{`
         .bo-back{position:fixed;inset:0;background:rgba(20,16,12,.62);backdrop-filter:blur(10px);z-index:500;display:grid;place-items:center;padding:32px;animation:fadeIn .25s ease}
         .bo-modal{position:relative;background:#fff;border-radius:20px;width:min(1180px,96vw);max-height:94vh;display:grid;grid-template-columns:1fr 380px;overflow:hidden;box-shadow:0 40px 100px -20px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.08);animation:popIn .3s cubic-bezier(.2,.8,.2,1)}
-        .bo-close{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);transition:all .15s;z-index:10}
+        .bo-close{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);transition:all .15s;z-index:10;cursor:pointer}
         .bo-close:hover{background:#fff;transform:scale(1.06);border-color:var(--ink)}
-        .bo-minimize{position:absolute;top:16px;right:62px;padding:8px 12px;border-radius:11px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:600;transition:all .15s;z-index:10;cursor:pointer;font-family:inherit}
-        .bo-minimize:hover{background:#fff;border-color:var(--ink-2)}
+        .bo-minimize{position:absolute;top:16px;right:62px;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);transition:all .15s;z-index:10;cursor:pointer}
+        .bo-minimize:hover{background:#fff;transform:scale(1.06);border-color:var(--ink)}
 
         .bo-stage-wrap{position:relative;background:#fff;display:flex;align-items:center;justify-content:center;padding:30px 30px 80px;min-height:560px;border-right:1px solid var(--line)}
         .bo-stage{position:relative;width:100%;height:100%;min-height:480px;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}

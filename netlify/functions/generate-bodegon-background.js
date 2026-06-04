@@ -2,10 +2,12 @@
 // Endpoint: POST /api/generate-bodegon  ({ skus, title, description })
 //
 // Variables de entorno requeridas (Site settings → Environment variables):
-//   GEMINI_API_KEY            (Google AI Studio)
+//   GEMINI_API_KEY            (Google AI Studio, con billing activado)
 //   SUPABASE_URL              (mismo valor que VITE_SUPABASE_URL)
 //   SUPABASE_SERVICE_ROLE_KEY (Supabase → Project Settings → API → service_role)
-//   GEMINI_IMAGE_MODEL        (opcional, por defecto gemini-2.5-flash-image-preview)
+//   GEMINI_IMAGE_MODEL        (OPCIONAL. Solo se respeta si contiene "pro" en
+//                              el nombre. Cualquier otra cosa se ignora — la
+//                              función fuerza Gemini 3 Pro.)
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -107,6 +109,19 @@ const STRUCTURE_RULES = `
 ================================================================
 PLACEMENT & FIDELITY — STRICT, NON-NEGOTIABLE
 ================================================================
+COMPOSITION SHAPE (top priority — the most common error is stacking
+too vertically):
+- The composition MUST be HORIZONTAL, like a Spanish gift hamper
+  ("cesta de Navidad") seen from the front: wide and shallow, NOT a
+  tall pyramid.
+- MAXIMUM 3 visual layers (depths) in the image: BACK / MIDDLE /
+  FRONT. NEVER 4, 5 or more stacked rows. If you cannot fit all
+  products in 3 layers, make the layers wider — never deeper.
+- The composition fills 75-90% of the frame WIDTH and only 55-70%
+  of the frame HEIGHT. The result must look WIDER than it is TALL.
+- Spread the products laterally across the full width of the frame.
+  Do NOT cluster them in a narrow central column.
+
 ORIENTATION:
 - EVERY bottle (wine, cava, sparkling wine, oil, vinegar, gin, rum,
   vermouth, liqueur, spirits) and EVERY jar, glass cube, tin, tube and
@@ -131,7 +146,28 @@ LABEL & BRAND FIDELITY (most common serious error — avoid it):
   product. Each reference image's design belongs ONLY to that product.
 - Keep each product's real shape, material and proportions.
 - If a label cannot be reproduced perfectly, copy it from the reference
-  image as a flat texture rather than inventing or "cleaning" it.`;
+  image as a flat texture rather than inventing or "cleaning" it.
+
+NO VARIANT SUBSTITUTION (critical — has caused real customer issues):
+- If the reference shows a SPECIFIC variant of a product (e.g., ZUBIA
+  MERMELADA MANGO Y JENGIBRE), the output MUST be that EXACT variant
+  with that exact label, flavour, colour and edition. Never substitute
+  it with another variant from the same brand (e.g., ZUBIA orange jam,
+  ZUBIA tomato jam, ZUBIA fig jam). The brand alone is NOT enough.
+- Same applies to EMPERATRIZ Bonito del Norte, ANTIU XIXONA turrón,
+  PORTOMAR conservas, etc. Always reproduce the SPECIFIC reference,
+  never a "generic" version of the brand.
+- If a product is unique to this catalog (you may not recognise it),
+  do NOT replace it with a more familiar product from the same
+  category. Trust the reference image, even if it looks unusual.
+
+GROUND TRUTH RULE:
+- Treat each reference image as a sacred ground truth. Your job is to
+  arrange these EXACT items in a composition, with new lighting and
+  shadows. You are NOT redesigning, regenerating or reimagining them.
+- Think of it like building a real gift hamper with real products on a
+  table and photographing it: the products are what they are. You only
+  decide where to place them.`;
 
 // Reglas de cantidad — se concatenan SIEMPRE al prompt final, venga el
 // template de Supabase o del DEFAULT. Garantiza que el modelo respete las
