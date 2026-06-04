@@ -446,10 +446,10 @@ export async function startBodegonGeneration({ items, skus, title, description, 
   return { id: ref, n: numero, title: finalTitle, description, tags: finalTags, items: normItems, skus: normItems.map(i => i.sku) };
 }
 
-// Timeout subido a 10 min. La función Netlify tiene 15 min, y aunque el
-// objetivo realista con Flash + paralelización está por debajo de 60s,
-// queremos sobrevivir si Gemini se atasca puntualmente.
-export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 10 * 60 * 1000, onTick } = {}) {
+// Timeout 14 min: aprovechamos casi al límite los 15 min de la función
+// Netlify en background. Con Pro + reintentos puede pasar de 5-7 min, y
+// no queremos cortarle el polling antes de tiempo.
+export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 14 * 60 * 1000, onTick } = {}) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const { data, error } = await supabase

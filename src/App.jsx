@@ -10,9 +10,11 @@ import ImportExcelModal from './components/ImportExcelModal.jsx';
 import SpecialOrderModal from './components/SpecialOrderModal.jsx';
 import BodegonEditOverlay from './components/BodegonEditOverlay.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
+import MinimizedGenPill from './components/MinimizedGenPill.jsx';
 import {
   listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
   listBodegones, updateBodegon, deleteBodegon,
+  startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon,
 } from './lib/api.js';
 import { SUPABASE_READY } from './lib/supabase.js';
 import { useTaxonomy } from './lib/taxonomy.jsx';
@@ -48,12 +50,14 @@ export default function App() {
   const [infoModal, setInfoModal] = useState(null);
   const showInfo = (cfg) => setInfoModal(cfg);
 
-  // Bodegón
+  // Bodegón — generación viva en background con posibilidad de minimizar.
+  // activeGen es la generación en curso (o el draft pendiente de guardar). Su
+  // ciclo de vida sobrevive a que el overlay se cierre (minimizar). bodegonOpen
+  // solo controla si el overlay es visible o no.
   const [bodegonNumber, setBodegonNumber] = useState(1);
-  const [bodegonTitle, setBodegonTitle] = useState('');
-  const [bodegonDesc, setBodegonDesc] = useState('');
-  const [bodegonTags, setBodegonTags] = useState([]); // etiquetas del lote (sin gluten, vegano…)
   const [bodegonOpen, setBodegonOpen] = useState(false);
+  // activeGen: { ref, title, description, tags, items, status, image, image_path, error, t0 }
+  const [activeGen, setActiveGen] = useState(null);
 
   // Initial load
   useEffect(() => {
@@ -117,30 +121,123 @@ export default function App() {
   };
   const clearSel = () => { setSelected([]); setQtys({}); };
 
-  // Llamado desde SpecialOrderModal y BodegonEditOverlay: precarga selección,
-  // título, descripción y etiquetas y lanza el overlay de generación.
+  // Pide permiso de notificación (la primera vez). Si el usuario lo deniega,
+  // simplemente no notificamos. Llamamos sin await para no bloquear.
+  const ensureNotifPermission = () => {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+      try { Notification.requestPermission().catch(() => {}); } catch {}
+    }
+  };
+
+  // Notifica al sistema (solo si hay permiso y el overlay está cerrado).
+  const notifyBodegonReady = (title) => {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    try {
+      const n = new Notification('Bodegón listo', {
+        body: title || 'Tu bodegón está listo para revisar.',
+        icon: '/favicon.ico',
+        tag: 'bodegon-listo', // sustituye notificaciones anteriores
+      });
+      n.onclick = () => {
+        try { window.focus(); } catch {}
+        setBodegonOpen(true);
+        try { n.close(); } catch {}
+      };
+    } catch {}
+  };
+
+  // Arranca una generación nueva. Centraliza el flujo manual y el de pedidos
+  // especiales / regenerar.
+  const startBodegon = async ({ items, title, description, tags }) => {
+    if (activeGen) {
+      showInfo({
+        icon: 'sparkle', tone: 'info',
+        title: 'Ya hay un bodegón generándose',
+        description: 'Espera a que termine (o cancélalo desde la píldora) antes de iniciar otro.',
+        confirmLabel: 'Entendido', confirmTone: 'neutral',
+      });
+      return;
+    }
+    if (!items || items.length < 2) return;
+    ensureNotifPermission();
+    try {
+      const created = await startBodegonGeneration({
+        items, title, description: description || '', tags: tags || [],
+      });
+      setActiveGen({
+        ref: created.id,
+        title: created.title || title || `Bodegón IA #${bodegonNumber}`,
+        description: description || '',
+        tags: tags || [],
+        items: items.map(i => ({ sku: i.sku, qty: i.qty || 1 })),
+        status: 'generating',
+        image: null,
+        image_path: null,
+        error: null,
+        t0: Date.now(),
+      });
+      setBodegonOpen(true);
+    } catch (e) {
+      showInfo({
+        icon: 'trash', tone: 'danger',
+        title: 'No se pudo iniciar el bodegón',
+        description: e.message || 'Error desconocido al registrar el bodegón.',
+        confirmLabel: 'Cerrar', confirmTone: 'neutral',
+      });
+    }
+  };
+
+  // Effect de polling — sobrevive al cierre del overlay. Cuando termina,
+  // si el overlay está cerrado, notifica al sistema.
+  const overlayOpenRef = React.useRef(false);
+  overlayOpenRef.current = bodegonOpen;
+  useEffect(() => {
+    if (!activeGen || activeGen.status !== 'generating') return;
+    let cancelled = false;
+    const ref = activeGen.ref;
+    const fixedTitle = activeGen.title;
+    (async () => {
+      try {
+        const result = await pollBodegon(ref);
+        if (cancelled) return;
+        setActiveGen(prev => (prev && prev.ref === ref) ? {
+          ...prev,
+          status: 'draft',
+          image: result.image,
+          image_path: result.image_path,
+        } : prev);
+        if (!overlayOpenRef.current) notifyBodegonReady(fixedTitle);
+      } catch (e) {
+        if (cancelled) return;
+        setActiveGen(prev => (prev && prev.ref === ref) ? {
+          ...prev, status: 'failed', error: e.message || String(e),
+        } : prev);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGen?.ref, activeGen?.status]);
+
+  // Llamado desde SpecialOrderModal y BodegonEditOverlay → arranca la generación.
   const handleSpecialOrderConfirm = ({ items, title, description, tags }) => {
     if (!items || !items.length) return;
-    const skus = items.map(i => i.sku);
-    const qtyMap = Object.fromEntries(items.map(i => [i.sku, i.qty || 1]));
-    setSelected(skus);
-    setQtys(qtyMap);
-    setBodegonTitle(title || `Bodegón IA #${bodegonNumber}`);
-    setBodegonDesc(description || '');
-    setBodegonTags(Array.isArray(tags) ? tags : []);
     setSpecialOrderOpen(false);
-    setBodegonOpen(true);
+    startBodegon({
+      items,
+      title: title || `Bodegón IA #${bodegonNumber}`,
+      description: description || '',
+      tags: tags || [],
+    });
   };
 
   const handleCreate = () => {
     if (selected.length < 2) {
       showInfo({
-        icon: 'sparkle',
-        tone: 'info',
+        icon: 'sparkle', tone: 'info',
         title: 'Selecciona al menos 2 productos',
         description: 'Para crear un bodegón necesitas elegir como mínimo 2 productos del catálogo.',
-        confirmLabel: 'Entendido',
-        confirmTone: 'neutral',
+        confirmLabel: 'Entendido', confirmTone: 'neutral',
       });
       return;
     }
@@ -150,8 +247,7 @@ export default function App() {
     });
     if (missing.length) {
       showInfo({
-        icon: 'upload',
-        tone: 'info',
+        icon: 'upload', tone: 'info',
         title: 'Algunos productos no tienen foto',
         description: (
           <>
@@ -160,25 +256,56 @@ export default function App() {
             Edita esos productos y sube una imagen antes de incluirlos.
           </>
         ),
-        confirmLabel: 'Entendido',
-        confirmTone: 'neutral',
+        confirmLabel: 'Entendido', confirmTone: 'neutral',
       });
       return;
     }
-    setBodegonTitle(`Bodegón IA #${bodegonNumber}`);
-    setBodegonDesc('');
-    setBodegonTags([]);
-    setBodegonOpen(true);
+    const items = selected.map(sku => ({ sku, qty: qtys[sku] || 1 }));
+    startBodegon({
+      items,
+      title: `Bodegón IA #${bodegonNumber}`,
+      description: '',
+      tags: [],
+    });
   };
 
-  const handleSavedBodegon = async (gen) => {
-    setBodegonOpen(false);
+  // ---- Acciones desde el BodegonOverlay (pasa por activeGen) ----
+  const handleOverlayMinimize = () => setBodegonOpen(false);
+  const handleOverlayRegen = () => {
+    if (!activeGen) return;
+    const items = activeGen.items;
+    const title = activeGen.title;
+    const description = activeGen.description;
+    const tags = activeGen.tags;
+    // Descartamos el actual (borra fila + imagen) y arrancamos uno nuevo con
+    // los mismos parámetros.
+    const oldRef = activeGen.ref;
+    setActiveGen(null);
+    discardBodegon(oldRef).catch(() => {});
+    setTimeout(() => startBodegon({ items, title, description, tags }), 50);
+  };
+  const handleOverlaySave = async () => {
+    if (!activeGen || activeGen.status !== 'draft') return;
+    const saved = await commitBodegon(activeGen.ref, {
+      nombre: activeGen.title,
+      descripcion: activeGen.description || null,
+      tags: activeGen.tags || [],
+    });
     setBodegonNumber(n => n + 1);
-    // Refrescar el historial desde la base de datos para que aparezca el guardado
-    try {
-      const bs = await listBodegones();
-      setHistory(bs);
-    } catch (e) { console.error(e); }
+    setBodegonOpen(false);
+    setActiveGen(null);
+    try { const bs = await listBodegones(); setHistory(bs); } catch (e) { console.error(e); }
+    return saved;
+  };
+  const handleOverlayDiscard = async () => {
+    if (!activeGen) return;
+    try { await discardBodegon(activeGen.ref); } catch (e) { console.warn(e); }
+    setBodegonOpen(false);
+    setActiveGen(null);
+  };
+  // Actualizar metadatos en activeGen (título / descripción / etiquetas).
+  const handleOverlayUpdateMeta = (patch) => {
+    setActiveGen(prev => prev ? { ...prev, ...patch } : prev);
   };
 
   const handleDeletedBodegon = async (id) => {
@@ -353,15 +480,20 @@ export default function App() {
 
       <BodegonOverlay
         open={bodegonOpen}
-        onClose={() => setBodegonOpen(false)}
+        activeGen={activeGen}
         products={products}
-        selected={selected}
-        qtys={qtys}
-        title={bodegonTitle} setTitle={setBodegonTitle}
-        description={bodegonDesc} setDescription={setBodegonDesc}
-        tags={bodegonTags} setTags={setBodegonTags}
-        onSaved={handleSavedBodegon}
-        onDeleted={handleDeletedBodegon}
+        onMinimize={handleOverlayMinimize}
+        onRegen={handleOverlayRegen}
+        onSave={handleOverlaySave}
+        onDiscard={handleOverlayDiscard}
+        onUpdateMeta={handleOverlayUpdateMeta}
+      />
+
+      <MinimizedGenPill
+        activeGen={activeGen}
+        visible={!!activeGen && !bodegonOpen}
+        onOpen={() => setBodegonOpen(true)}
+        onCancel={handleOverlayDiscard}
       />
 
       <SpecialOrderModal

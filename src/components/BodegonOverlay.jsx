@@ -1,130 +1,107 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
-import { startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon } from '../lib/api.js';
 import { useTaxonomy } from '../lib/taxonomy.jsx';
 import DownloadModal from './DownloadModal.jsx';
 
+// Vista del bodegón generado o en curso. El estado de la generación
+// (status, image, error, t0) vive en App.activeGen y se pasa por props;
+// este componente solo dispara handlers (minimizar, regenerar, guardar,
+// descartar, editar metadata).
+//
+// Props:
+//   open          → si el overlay es visible
+//   activeGen     → { ref, title, description, tags, items, status, image, error, t0 }
+//   products      → catálogo (para resolver imágenes/nombres por sku)
+//   onMinimize    → cerrar overlay manteniendo la generación viva
+//   onRegen       → descartar el actual y arrancar uno nuevo con los mismos productos
+//   onSave        → commit a 'completed' y refresh historial
+//   onDiscard     → discardBodegon (borra fila + imagen)
+//   onUpdateMeta  → actualizar title/description/tags en activeGen
 export default function BodegonOverlay({
-  open, onClose, products, selected, qtys = {},
-  title, setTitle, description, setDescription,
-  tags = [], setTags,
-  onSaved, onDeleted,
+  open, activeGen, products,
+  onMinimize, onRegen, onSave, onDiscard, onUpdateMeta,
 }) {
   const { tags: allTags } = useTaxonomy();
-  const toggleTag = (id) => {
-    if (!setTags) return;
-    setTags(tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id]);
-  };
+
   const [editingTitle, setEditingTitle] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState(null);
-  const [generated, setGenerated] = useState(null); // { id, image, image_path, title, description, skus }
   const [savedHint, setSavedHint] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   const [dlOpen, setDlOpen] = useState(false);
+  // Cronómetro local actualizado cada segundo para mostrar el tiempo
+  // transcurrido durante la generación.
+  const [elapsed, setElapsed] = useState(0);
 
-  const sel = selected.map(s => products.find(p => p.sku === s)).filter(Boolean);
+  // Reset transientes cuando cambia el bodegón activo o se cierra.
+  useEffect(() => { setEditingTitle(false); setSavedHint(false); setZoomed(false); }, [activeGen?.ref]);
+
+  // Ticker del tiempo transcurrido (solo mientras está generando).
+  useEffect(() => {
+    if (!open || !activeGen || activeGen.status !== 'generating') { setElapsed(0); return; }
+    const update = () => setElapsed(Math.max(0, Math.round((Date.now() - activeGen.t0) / 1000)));
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [open, activeGen?.status, activeGen?.t0]);
+
+  if (!open || !activeGen) return null;
+
+  const status = activeGen.status;
+  const generating = status === 'generating';
+  const error = status === 'failed' ? activeGen.error : null;
+  const ready = status === 'draft' && activeGen.image;
+
+  const title = activeGen.title || '';
+  const description = activeGen.description || '';
+  const tags = Array.isArray(activeGen.tags) ? activeGen.tags : [];
+  const items = activeGen.items || [];
+
+  const setTitle = (v) => onUpdateMeta && onUpdateMeta({ title: v });
+  const setDescription = (v) => onUpdateMeta && onUpdateMeta({ description: v });
+  const toggleTag = (id) => {
+    if (!onUpdateMeta) return;
+    const next = tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id];
+    onUpdateMeta({ tags: next });
+  };
+
+  const sel = items.map(it => products.find(p => p.sku === it.sku)).filter(Boolean);
   const sorted = [...sel].sort((a, b) => b.h - a.h);
   const maxH = Math.max(...sel.map(p => p.h), 30);
-  const qtyOf = (sku) => qtys[sku] || 1;
-  const totalUnits = sel.reduce((sum, p) => sum + qtyOf(p.sku), 0);
-  // Items con cantidad para mandar a la generación
-  const itemsWithQty = selected.map(sku => ({ sku, qty: qtyOf(sku) }));
-
-  const runGeneration = async () => {
-    setError(null);
-    setGenerated(null);
-    setGenerating(true);
-    setElapsed(0);
-    const t0 = Date.now();
-    const tick = setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
-    try {
-      const created = await startBodegonGeneration({
-        items: itemsWithQty,
-        title,
-        description: description || '',
-        tags,
-      });
-      if (created.title) setTitle(created.title);
-      const result = await pollBodegon(created.id);
-      setGenerated(result);
-    } catch (e) {
-      console.error(e);
-      setError(e.message || 'Error generando el bodegón.');
-    } finally {
-      clearInterval(tick);
-      setGenerating(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    runGeneration();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const handleRegen = () => runGeneration();
+  const qtyOf = (sku) => items.find(it => it.sku === sku)?.qty || 1;
+  const totalUnits = items.reduce((s, x) => s + (x.qty || 1), 0);
 
   const handleSave = async () => {
-    if (!generated) return;
+    if (!ready) return;
     try {
-      const saved = await commitBodegon(generated.id, {
-        nombre: title,
-        descripcion: description || null,
-        tags: tags || [],
-      });
+      await onSave?.();
       setSavedHint(true);
-      setTimeout(() => {
-        setSavedHint(false);
-        onSaved && onSaved(saved || generated);
-        onClose();
-      }, 700);
+      setTimeout(() => setSavedHint(false), 700);
     } catch (e) {
-      setError(e.message || 'Error guardando en historial.');
+      console.error(e);
     }
   };
 
-  const handleDelete = async () => {
-    try {
-      if (generated?.id) await discardBodegon(generated.id);
-    } catch (e) {
-      console.warn('No se pudo descartar:', e);
-    }
-    if (generated?.id) onDeleted && onDeleted(generated.id);
-    onClose();
-  };
-
-  // Al cerrar el modal sin guardar, descartar el draft también
-  const handleClose = async () => {
-    if (generated?.id) {
-      try { await discardBodegon(generated.id); } catch {}
-    }
-    onClose();
-  };
-
-  const handleDownload = () => {
-    if (!generated?.image) return;
-    setDlOpen(true);
-  };
-
-  if (!open) return null;
+  const handleDownload = () => { if (ready) setDlOpen(true); };
 
   return (
     <div className="bo-back">
       <div className="bo-modal" onClick={e => e.stopPropagation()}>
         <button
           className="bo-close"
-          onClick={handleClose}
-          title="Cerrar (descarta el bodegón si no lo has guardado)"
+          onClick={onMinimize}
+          title="Minimizar — la generación sigue en segundo plano"
         >{I.close({ size: 18 })}</button>
+        <button
+          className="bo-minimize"
+          onClick={onMinimize}
+          title="Minimizar — sigue trabajando mientras Pro genera"
+        >Minimizar</button>
 
         <div className="bo-stage-wrap">
           <div className={`bo-stage ${generating ? 'busy' : ''}`}>
             {generating && (
               <div className="bo-loading">
                 <div className="bo-loading-orb"/>
-                <div className="bo-loading-text">Generando con IA…</div>
+                <div className="bo-loading-text">Generando con Gemini Pro…</div>
                 <div className="bo-loading-sub">
                   {elapsed < 8 && 'Construyendo el prompt y enviando referencias'}
                   {elapsed >= 8 && elapsed < 25 && 'Componiendo la pirámide TRASERA → MEDIA → DELANTERA'}
@@ -133,9 +110,12 @@ export default function BodegonOverlay({
                   {elapsed >= 120 && elapsed < 180 && 'Pro está siendo muy fiel — esto suele tardar 2-4 min'}
                   {elapsed >= 180 && elapsed < 300 && 'Más de 3 min. Pro hoy va lento; sigue trabajando.'}
                   {elapsed >= 300 && elapsed < 420 && 'Más de 5 min. Si pasa de 7-8, vuelve a Regenerar.'}
-                  {elapsed >= 420 && 'Está tardando demasiado. Considera Regenerar o cambiar a Rápido en Configuración.'}
+                  {elapsed >= 420 && 'Está tardando demasiado. Considera Regenerar.'}
                 </div>
                 {elapsed > 0 && <div className="bo-loading-sub" style={{opacity:.6,marginTop:4}}>{elapsed}s</div>}
+                <button className="bo-min-btn" onClick={onMinimize} title="Cerrar este modal y seguir trabajando">
+                  {I.expand({ size: 13 })} Minimizar y seguir trabajando
+                </button>
               </div>
             )}
 
@@ -143,18 +123,18 @@ export default function BodegonOverlay({
               <div className="bo-error">
                 <div className="bo-error-t">No se ha podido generar el bodegón</div>
                 <div className="bo-error-s">{error}</div>
-                <button className="bo-btn bo-btn-ghost" onClick={handleRegen}>{I.refresh({ size: 14 })} Reintentar</button>
+                <button className="bo-btn bo-btn-ghost" onClick={onRegen}>{I.refresh({ size: 14 })} Reintentar</button>
               </div>
             )}
 
-            {!generating && !error && generated?.image && (
+            {ready && (
               <button type="button" className="bo-img-wrap" onClick={() => setZoomed(true)} title="Ampliar imagen">
-                <img className="bo-img" src={generated.image} alt={title} />
+                <img className="bo-img" src={activeGen.image} alt={title} />
                 <span className="bo-zoom-hint">{I.expand({ size: 14 })} Ampliar</span>
               </button>
             )}
 
-            {!generating && !error && !generated?.image && (
+            {!generating && !error && !ready && (
               <div className="bo-comp">
                 {sorted.map((p, i) => {
                   const layer = i;
@@ -183,7 +163,7 @@ export default function BodegonOverlay({
               </div>
             )}
           </div>
-          <button className="bo-regen" onClick={handleRegen} disabled={generating} title="Regenerar otra variación">
+          <button className="bo-regen" onClick={onRegen} disabled={generating} title="Regenerar otra variación (descarta el actual y empieza otra)">
             {I.refresh({ size: 14 })} Regenerar
           </button>
         </div>
@@ -222,7 +202,7 @@ export default function BodegonOverlay({
             rows={4}
           />
 
-          {allTags.length > 0 && setTags && (
+          {allTags.length > 0 && (
             <>
               <div className="bo-section-h">Etiquetas del lote</div>
               <div className="bo-tags">
@@ -257,15 +237,15 @@ export default function BodegonOverlay({
 
           <div className="bo-actions">
             <div className="bo-actions-row">
-              <button className="bo-btn bo-btn-ghost" onClick={handleDelete} title="Descartar bodegón">
+              <button className="bo-btn bo-btn-ghost" onClick={onDiscard} title="Descartar el bodegón (lo borra)">
                 {I.trash({ size: 14 })} Eliminar
               </button>
-              <button className="bo-btn bo-btn-ghost" disabled={generating || !generated?.image} onClick={handleDownload}>
+              <button className="bo-btn bo-btn-ghost" disabled={!ready} onClick={handleDownload}>
                 {I.download({ size: 14 })} Descargar
               </button>
             </div>
             <div className="bo-actions-row">
-              <button className="bo-btn bo-btn-primary" disabled={generating || !generated?.image} onClick={handleSave}>
+              <button className="bo-btn bo-btn-primary" disabled={!ready} onClick={handleSave}>
                 {savedHint ? '✓ Guardado en historial' : <>{I.check({ size: 14 })} Guardar en historial</>}
               </button>
             </div>
@@ -273,7 +253,7 @@ export default function BodegonOverlay({
         </aside>
       </div>
 
-      {zoomed && generated?.image && (
+      {zoomed && ready && (
         <div
           className="bo-zoom-bg"
           onClick={(e) => { e.stopPropagation(); setZoomed(false); }}
@@ -284,7 +264,7 @@ export default function BodegonOverlay({
           >{I.close({ size: 22 })}</button>
           <img
             className="bo-zoom-img"
-            src={generated.image}
+            src={activeGen.image}
             alt={title}
             onClick={(e) => e.stopPropagation()}
           />
@@ -294,7 +274,7 @@ export default function BodegonOverlay({
       <DownloadModal
         open={dlOpen}
         onClose={() => setDlOpen(false)}
-        bodegon={generated ? { ...generated, title, description, skus: selected, created_at: new Date().toISOString() } : null}
+        bodegon={ready ? { id: activeGen.ref, title, description, skus: items.map(i => i.sku), image: activeGen.image, image_path: activeGen.image_path, created_at: new Date().toISOString() } : null}
         products={products}
       />
 
@@ -303,6 +283,8 @@ export default function BodegonOverlay({
         .bo-modal{position:relative;background:#fff;border-radius:20px;width:min(1180px,96vw);max-height:94vh;display:grid;grid-template-columns:1fr 380px;overflow:hidden;box-shadow:0 40px 100px -20px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.08);animation:popIn .3s cubic-bezier(.2,.8,.2,1)}
         .bo-close{position:absolute;top:16px;right:16px;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);transition:all .15s;z-index:10}
         .bo-close:hover{background:#fff;transform:scale(1.06);border-color:var(--ink)}
+        .bo-minimize{position:absolute;top:16px;right:62px;padding:8px 12px;border-radius:11px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:600;transition:all .15s;z-index:10;cursor:pointer;font-family:inherit}
+        .bo-minimize:hover{background:#fff;border-color:var(--ink-2)}
 
         .bo-stage-wrap{position:relative;background:#fff;display:flex;align-items:center;justify-content:center;padding:30px 30px 80px;min-height:560px;border-right:1px solid var(--line)}
         .bo-stage{position:relative;width:100%;height:100%;min-height:480px;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}
@@ -324,11 +306,13 @@ export default function BodegonOverlay({
         .bo-loading-orb{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#fff,var(--accent-soft));box-shadow:0 0 0 0 var(--accent-soft);animation:boOrb 1.4s ease-in-out infinite}
         @keyframes boOrb{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(167,77,74,.4)}50%{transform:scale(1.08);box-shadow:0 0 0 18px rgba(167,77,74,0)}}
         .bo-loading-text{font-family:'Fraunces',serif;font-size:18px;color:var(--ink);margin-top:14px}
-        .bo-loading-sub{font-size:12.5px;color:var(--muted)}
+        .bo-loading-sub{font-size:12.5px;color:var(--muted);max-width:380px;line-height:1.5}
+        .bo-min-btn{margin-top:18px;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:99px;background:#fff;border:1px solid var(--line);color:var(--ink);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+        .bo-min-btn:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px);box-shadow:0 6px 16px -6px rgba(167,77,74,.3)}
 
         .bo-error{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:32px;color:var(--accent)}
         .bo-error-t{font-family:'Fraunces',serif;font-size:18px;color:var(--ink);font-weight:500}
-        .bo-error-s{font-size:13px;color:var(--muted);max-width:420px;line-height:1.55}
+        .bo-error-s{font-size:13px;color:var(--muted);max-width:420px;line-height:1.55;white-space:pre-wrap;text-align:left}
 
         .bo-comp{position:relative;width:100%;height:100%;animation:fadeIn .5s ease}
         .bo-floor{position:absolute;left:-10%;right:-10%;bottom:6%;height:16px;background:radial-gradient(ellipse at center, rgba(45,42,38,.18), transparent 70%);filter:blur(6px);z-index:1}
@@ -382,6 +366,7 @@ export default function BodegonOverlay({
           .bo-modal{grid-template-columns:1fr;max-height:96vh}
           .bo-stage-wrap{min-height:340px;padding:32px 24px 64px}
           .bo-side{border-top:1px solid var(--line)}
+          .bo-minimize{right:62px}
         }
       `}</style>
     </div>

@@ -9,34 +9,24 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const MODEL_PRO = 'gemini-3-pro-image-preview';      // Máxima fidelidad, lento
-const MODEL_FLASH = [
-  'gemini-3.1-flash-image-preview',                  // Rápido
-  'gemini-2.5-flash-image',                          // Flash estable
-];
-
-// Orden de modelos según la calidad elegida en Configuración (settings.image_quality):
-//   'quality' (por defecto) → SOLO Pro. SIN fallback a Flash. Si Pro falla, devolvemos
-//                             error claro al usuario. Decisión deliberada: Flash genera
-//                             resultados que "parecen casi bien" pero con etiquetas o
-//                             cantidades equivocadas, lo cual es peor que un error
-//                             explícito (el usuario puede reintentar o cambiar a
-//                             Rápido). 2-4 min con 20-30 productos.
-//   'fast'                  → Flash primero, Pro como último recurso si Flash falla.
-//                             ~30s pero a veces tumba botellas o confunde productos.
-// La env var GEMINI_IMAGE_MODEL, si está definida, va siempre primero.
-function modelOrder(quality) {
-  const envOverride = process.env.GEMINI_IMAGE_MODEL || '';
-  if (quality === 'fast') {
-    // En modo rápido respetamos cualquier override del usuario.
-    return [envOverride, ...MODEL_FLASH, MODEL_PRO].filter(Boolean);
-  }
-  // quality === 'quality': estricto Pro. SOLO respetamos el env override si
-  // también es Pro; si era un Flash quedado de pruebas viejas, lo ignoramos
-  // para no engañar al usuario que pidió máxima calidad.
-  const safeOverride = /pro/i.test(envOverride) ? envOverride : null;
-  return [safeOverride, MODEL_PRO].filter(Boolean);
+// Único motor: Gemini 3 Pro Image. Tras probar Flash (etiquetas malas,
+// botellas tumbadas) y Seedream 4 (etiquetas cambiadas), Pro es el único
+// que respeta etiquetas, colores y orientación para uso con cliente.
+// El usuario puede sobreescribir el modelo con GEMINI_IMAGE_MODEL en
+// Netlify si en algún momento quiere experimentar, pero solo se respeta
+// si el override contiene "pro" en el nombre (evita confusiones con
+// Flash residual de pruebas viejas).
+const MODEL_PRO = 'gemini-3-pro-image-preview';
+function proModelToUse() {
+  const env = process.env.GEMINI_IMAGE_MODEL || '';
+  return /pro/i.test(env) ? env : MODEL_PRO;
 }
+
+// Cuántas veces reintentar Pro ante errores transitorios (5xx, overloaded,
+// timeouts puntuales de Google) antes de devolver fallo al usuario.
+const PRO_MAX_ATTEMPTS = 3;
+// Backoff (ms) entre reintentos.
+const PRO_RETRY_BACKOFF_MS = 2500;
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
 The result must look like a clean, polished product hero shot for an online catalog or product listing page — NOT a lifestyle photo, NOT a flat lay, NOT a holiday/Christmas decorative scene.
@@ -329,9 +319,8 @@ export const handler = async (event) => {
     return json(400, { error: 'Ningún producto del bodegón tiene foto.' });
   }
 
-  // 3) Cargar plantilla de prompt y calidad de imagen (configurables desde Settings)
+  // 3) Cargar plantilla de prompt (configurable desde Settings)
   let template = DEFAULT_PROMPT_TEMPLATE;
-  let quality = 'quality'; // por defecto: máxima calidad (Pro primero)
   try {
     const { data: setting } = await supabase
       .from('settings')
@@ -339,14 +328,6 @@ export const handler = async (event) => {
       .eq('key', 'prompt_template')
       .maybeSingle();
     if (setting?.value && typeof setting.value === 'string') template = setting.value;
-  } catch {}
-  try {
-    const { data: qSetting } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'image_quality')
-      .maybeSingle();
-    if (qSetting?.value === 'fast' || qSetting?.value === 'quality') quality = qSetting.value;
   } catch {}
 
   // 4) Construir prompt
@@ -378,116 +359,75 @@ export const handler = async (event) => {
   const refImages = refResults.filter(Boolean);
   console.log(`[Gemini] descarga de ${refImages.length} imágenes en ${((Date.now() - tImg0) / 1000).toFixed(1)}s`);
 
-  // 6) Llamar al motor de imagen — Seedream 4 vía fal.ai si quality==='seedream',
-  //    Gemini en cualquier otro caso. Compartimos prompt y refImages.
-  const FN_VERSION = 'v5-2026-06-04';
-  console.log(`[bodegón] ${FN_VERSION} · calidad: ${quality}`);
+  // 6) Llamar a Gemini 3 Pro. Reintentamos varias veces ante errores
+  //    transitorios (5xx, overloaded, timeouts puntuales). Pro es el ÚNICO
+  //    motor: sin Flash ni Seedream de fallback, porque ambos cambian
+  //    etiquetas y eso es inaceptable para el cliente.
+  const FN_VERSION = 'v6-2026-06-04';
+  const model = proModelToUse();
+  console.log(`[bodegón] ${FN_VERSION} · modelo: ${model}`);
 
   let imageBase64 = null;
   let imageMime = 'image/png';
   let usedModel = null;
-  const allErrors = []; // [{model, variant, error}]
+  const allErrors = []; // [{model, variant, attempt, error}]
 
-  if (quality === 'seedream') {
-    // ----------- Seedream 4 Edit vía fal.ai -----------
-    const falKey = process.env.FAL_KEY;
-    if (!falKey) {
-      const m = 'Falta la variable FAL_KEY en Netlify para usar Seedream. Ve a Site settings → Environment variables y pega tu API key de fal.ai.';
-      await markFailed(supabase, ref, m);
-      return json(500, { error: m });
-    }
-    // Seedream acepta URLs públicas. Las imágenes están en bucket público.
-    const refUrls = sortedProducts.map(r => {
-      const { data } = supabase.storage.from('productos').getPublicUrl(r.foto_path);
-      return data.publicUrl;
-    });
-    try {
-      const tSr = Date.now();
-      const sr = await fetch('https://fal.run/fal-ai/bytedance/seedream/v4/edit', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Key ${falKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt,
-          image_urls: refUrls,
-          image_size: { width: 1664, height: 1248 }, // 4:3, ~2 MP
-        }),
-      });
-      const srText = await sr.text();
-      let srJson;
-      try { srJson = JSON.parse(srText); } catch { srJson = null; }
-      if (!sr.ok) {
-        const m = srJson?.detail || srJson?.error || srText || `HTTP ${sr.status}`;
-        throw new Error(typeof m === 'string' ? m : JSON.stringify(m));
-      }
-      const outUrl = srJson?.images?.[0]?.url;
-      if (!outUrl) throw new Error('Seedream respondió sin imagen.');
-      // Descargar la imagen generada para subirla a nuestro storage.
-      const imgRes = await fetch(outUrl);
-      if (!imgRes.ok) throw new Error(`No se pudo descargar la imagen generada (${imgRes.status}).`);
-      const buf = Buffer.from(await imgRes.arrayBuffer());
-      imageBase64 = buf.toString('base64');
-      imageMime = imgRes.headers.get('content-type') || 'image/jpeg';
-      usedModel = 'seedream-v4-edit';
-      console.log(`[Seedream] ✓ imagen en ${((Date.now() - tSr) / 1000).toFixed(1)}s`);
-    } catch (e) {
-      const m = `Seedream falló: ${e.message || String(e)}`;
-      console.error('[Seedream]', m);
-      allErrors.push({ model: 'seedream-v4-edit', variant: 'fal.ai', error: m });
-    }
-  } else {
-    // ----------- Gemini (Pro o Flash) -----------
-    const MODEL_FALLBACKS = modelOrder(quality);
-    console.log(`[Gemini] modelos a probar:`, MODEL_FALLBACKS);
+  const parts = [{ text: prompt }];
+  for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
 
-    const parts = [{ text: prompt }];
-    for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+  const REQUEST_VARIANTS = [
+    { name: 'responseModalities[IMAGE]', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
+    { name: 'responseModalities[TEXT,IMAGE]', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
+  ];
 
-    // Variantes simplificadas: la API v1 no acepta responseModalities, así que solo v1beta.
-    const REQUEST_VARIANTS = [
-      { name: 'v1beta + responseModalities[IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
-      { name: 'v1beta + responseModalities[TEXT,IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
-    ];
+  // ¿El error es transitorio (merece reintento)?
+  const isTransient = (errMsg, status) => {
+    if (status >= 500 && status < 600) return true;
+    const m = String(errMsg || '').toLowerCase();
+    return /overloaded|unavailable|timeout|deadline|rate.?limit|try.again/.test(m);
+  };
 
-    geminiLoop: {
-      for (const model of MODEL_FALLBACKS) {
-        for (const variant of REQUEST_VARIANTS) {
-          try {
-            const url = `https://generativelanguage.googleapis.com/${variant.apiVersion}/models/${model}:generateContent?key=${geminiKey}`;
-            const r = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(variant.body),
-            });
-            const j = await r.json();
-            if (!r.ok) {
-              const err = j?.error?.message || `HTTP ${r.status}`;
-              allErrors.push({ model, variant: variant.name, error: err });
-              console.warn(`[Gemini] ${model} (${variant.name}) →`, err);
-              continue;
-            }
-            const cand = j?.candidates?.[0];
-            const partsOut = cand?.content?.parts || [];
-            for (const part of partsOut) {
-              if (part.inlineData?.data) {
-                imageBase64 = part.inlineData.data;
-                imageMime = part.inlineData.mimeType || 'image/png';
-                usedModel = `${model} (${variant.name})`;
-                break;
-              }
-            }
-            if (imageBase64) {
-              console.log(`[Gemini] ✓ Imagen generada con ${usedModel}`);
-              break geminiLoop;
-            }
-            allErrors.push({ model, variant: variant.name, error: 'respuesta sin imagen' });
-          } catch (e) {
-            const err = e.message || String(e);
-            allErrors.push({ model, variant: variant.name, error: err });
-            console.warn(`[Gemini] ${model} (${variant.name}) excepción:`, err);
+  proLoop: for (const variant of REQUEST_VARIANTS) {
+    for (let attempt = 1; attempt <= PRO_MAX_ATTEMPTS; attempt++) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(variant.body),
+        });
+        const j = await r.json();
+        if (!r.ok) {
+          const err = j?.error?.message || `HTTP ${r.status}`;
+          allErrors.push({ model, variant: variant.name, attempt, error: err });
+          console.warn(`[Gemini Pro] ${variant.name} intento ${attempt} →`, err);
+          if (attempt < PRO_MAX_ATTEMPTS && isTransient(err, r.status)) {
+            await new Promise(res => setTimeout(res, PRO_RETRY_BACKOFF_MS * attempt));
+            continue;
           }
+          continue proLoop;
+        }
+        const cand = j?.candidates?.[0];
+        const partsOut = cand?.content?.parts || [];
+        for (const part of partsOut) {
+          if (part.inlineData?.data) {
+            imageBase64 = part.inlineData.data;
+            imageMime = part.inlineData.mimeType || 'image/png';
+            usedModel = model;
+            break;
+          }
+        }
+        if (imageBase64) {
+          console.log(`[Gemini Pro] ✓ imagen tras ${attempt} intento(s) (${variant.name})`);
+          break proLoop;
+        }
+        allErrors.push({ model, variant: variant.name, attempt, error: 'respuesta sin imagen' });
+      } catch (e) {
+        const err = e.message || String(e);
+        allErrors.push({ model, variant: variant.name, attempt, error: err });
+        console.warn(`[Gemini Pro] ${variant.name} intento ${attempt} excepción:`, err);
+        if (attempt < PRO_MAX_ATTEMPTS && isTransient(err, 0)) {
+          await new Promise(res => setTimeout(res, PRO_RETRY_BACKOFF_MS * attempt));
         }
       }
     }
@@ -526,15 +466,8 @@ export const handler = async (event) => {
         'Coste aproximado: ~$0.04/imagen con Gemini 3 Pro · ~$0.01/imagen con Flash. ' +
         'Para 100 bodegones al mes con Pro = ~$4 USD.';
     } else {
-      const detail = allErrors.map(e => `• ${e.model} [${e.variant}]: ${e.error}`).join('\n');
-      if (quality === 'seedream') {
-        msg = `Seedream 4 (fal.ai) no consiguió generar la imagen.\n\nQué hacer:\n• Pulsa Regenerar.\n• Si sigue fallando, comprueba que FAL_KEY esté bien en Netlify y que tu cuenta de fal.ai tenga saldo.\n• O cambia a otro motor en Configuración → Calidad de imagen.\n\nDetalle técnico:\n${detail}`;
-      } else if (quality === 'quality') {
-        msg = `Gemini 3 Pro no consiguió generar la imagen esta vez. Te lo decimos en vez de caer a Flash silenciosamente, porque querías máxima calidad.\n\nQué hacer:\n• Pulsa Regenerar — los errores transitorios de Pro son frecuentes.\n• Si sigue fallando, ve a Configuración → Calidad de imagen → Rápido (Flash) o Seedream para generar con otro motor.\n\nDetalle técnico:\n${detail}`;
-      } else {
-        msg = `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle:\n${detail}`;
-        if (availableImageModels.length) msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
-      }
+      const detail = allErrors.map(e => `• intento ${e.attempt} [${e.variant}]: ${e.error}`).join('\n');
+      msg = `Gemini 3 Pro no consiguió generar la imagen tras ${PRO_MAX_ATTEMPTS} intentos por variante.\n\nQué hacer:\n• Pulsa Regenerar — a veces Pro se atasca y al cabo de un rato vuelve.\n• Si insiste en fallar, mira los logs de Netlify (Functions → generate-bodegon-background → Logs) para ver el error exacto.\n\nDetalle técnico:\n${detail}`;
     }
 
     console.error('[Gemini] FAILED — todos los modelos:', allErrors);
