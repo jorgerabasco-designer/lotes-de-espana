@@ -26,11 +26,16 @@ const MODEL_FLASH = [
 //                             ~30s pero a veces tumba botellas o confunde productos.
 // La env var GEMINI_IMAGE_MODEL, si está definida, va siempre primero.
 function modelOrder(quality) {
+  const envOverride = process.env.GEMINI_IMAGE_MODEL || '';
   if (quality === 'fast') {
-    return [process.env.GEMINI_IMAGE_MODEL, ...MODEL_FLASH, MODEL_PRO].filter(Boolean);
+    // En modo rápido respetamos cualquier override del usuario.
+    return [envOverride, ...MODEL_FLASH, MODEL_PRO].filter(Boolean);
   }
-  // quality === 'quality': estricto, solo Pro.
-  return [process.env.GEMINI_IMAGE_MODEL, MODEL_PRO].filter(Boolean);
+  // quality === 'quality': estricto Pro. SOLO respetamos el env override si
+  // también es Pro; si era un Flash quedado de pruebas viejas, lo ignoramos
+  // para no engañar al usuario que pidió máxima calidad.
+  const safeOverride = /pro/i.test(envOverride) ? envOverride : null;
+  return [safeOverride, MODEL_PRO].filter(Boolean);
 }
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
