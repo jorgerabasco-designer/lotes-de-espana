@@ -9,19 +9,26 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-// Lista de modelos a probar en orden. Si la env var GEMINI_IMAGE_MODEL está definida, va primero.
-//
-// Orden: FLASH primero (rápido, ~30-90s con bodegones de 20-30 productos).
-// PRO al final, sólo si fallan los Flash. Pro es ~3-5x más lento cuando hay
-// muchas imágenes de referencia y se nos iba a >300s, que es inaceptable.
-// Si la calidad de Flash no convence en algún caso, basta con poner
-// `GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` en Netlify env vars.
-const MODEL_FALLBACKS = [
-  process.env.GEMINI_IMAGE_MODEL,
-  'gemini-3.1-flash-image-preview', // Rápido, calidad/coste balanceados — DEFAULT
-  'gemini-2.5-flash-image',         // Flash estable, fallback
-  'gemini-3-pro-image-preview',     // Máxima calidad pero lento, último recurso
-].filter(Boolean);
+const MODEL_PRO = 'gemini-3-pro-image-preview';      // Máxima fidelidad, lento
+const MODEL_FLASH = [
+  'gemini-3.1-flash-image-preview',                  // Rápido
+  'gemini-2.5-flash-image',                          // Flash estable
+];
+
+// Orden de modelos según la calidad elegida en Configuración (settings.image_quality):
+//   'quality' (por defecto) → Pro primero, Flash como fallback. Máxima fidelidad de
+//                             etiquetas y orientación; más lento (2-4 min con 20-30
+//                             productos), pero ya no falla por timeout gracias a las
+//                             descargas en paralelo + poll de 10 min.
+//   'fast'                  → Flash primero, Pro como último recurso. ~30s pero a
+//                             veces tumba botellas o cambia etiquetas.
+// La env var GEMINI_IMAGE_MODEL, si está definida, va siempre primero.
+function modelOrder(quality) {
+  const base = quality === 'fast'
+    ? [...MODEL_FLASH, MODEL_PRO]
+    : [MODEL_PRO, ...MODEL_FLASH];
+  return [process.env.GEMINI_IMAGE_MODEL, ...base].filter(Boolean);
+}
 
 const DEFAULT_PROMPT_TEMPLATE = `Professional studio still-life product composition for a Spanish gourmet gift hamper e-commerce catalog (lotesdeespana.es style).
 The result must look like a clean, polished product hero shot for an online catalog or product listing page — NOT a lifestyle photo, NOT a flat lay, NOT a holiday/Christmas decorative scene.
@@ -93,6 +100,40 @@ NEGATIVE — must NOT appear
 No text overlays, captions, logos or watermarks added by the generator. No people, no hands, no body parts. No props (no leaves, flowers, ribbons, baskets, trays, fabric, wood textures, marble, kitchen items). No Christmas / holiday decorations. No invented or modified product labels, no fictional brands. Do NOT add extra duplicate copies of any product beyond its stated QUANTITY. No reflections of windows, no studio equipment visible. No motion blur, no film grain, no vintage filter. No coloured background, no grey background, no gradient, no vignette — STRICTLY PURE WHITE. No long cast shadows on the background. No decorative sparkles or graphic embellishments.
 
 The final image must contain EXACTLY {N} product units in total, matching the QUANTITY specified for each product above.`;
+
+// Reglas de COLOCACIÓN y FIDELIDAD — se concatenan SIEMPRE al prompt final
+// (igual que QUANTITY_RULES), aunque el usuario tenga un prompt personalizado
+// en Supabase. Atacan los dos fallos típicos del modelo: tumbar botellas y
+// cambiar/intercambiar etiquetas.
+const STRUCTURE_RULES = `
+================================================================
+PLACEMENT & FIDELITY — STRICT, NON-NEGOTIABLE
+================================================================
+ORIENTATION:
+- EVERY bottle (wine, cava, sparkling wine, oil, vinegar, gin, rum,
+  vermouth, liqueur, spirits) and EVERY jar, glass cube, tin, tube and
+  tall box MUST stand UPRIGHT on its base, perfectly vertical, label
+  facing the camera. A bottle, jar or can lying on its side, tilted or
+  diagonal is a CRITICAL ERROR — never do it under any circumstance.
+- Only genuinely flat items (flat turrón boxes, flat bonito/sardine
+  tins) may lie flat, and ONLY in the front row, with their top label
+  facing straight up to the camera.
+- A whole cured ham leg or shoulder (jamón / paleta), if present, is the
+  ONLY large item that may rest diagonally low at the very front of the
+  composition, as is traditional — but reproduce its cloth wrap and
+  label EXACTLY as in its reference image.
+
+LABEL & BRAND FIDELITY (most common serious error — avoid it):
+- Reproduce every label EXACTLY as in its reference image: identical
+  brand name, identical wording, identical logo, identical colours,
+  identical illustration and identical typography.
+- Do NOT translate, redraw, restyle, simplify, recolour, swap or invent
+  any label, brand, text or graphic.
+- NEVER place one product's label, colour or branding onto a different
+  product. Each reference image's design belongs ONLY to that product.
+- Keep each product's real shape, material and proportions.
+- If a label cannot be reproduced perfectly, copy it from the reference
+  image as a flat texture rather than inventing or "cleaning" it.`;
 
 // Reglas de cantidad — se concatenan SIEMPRE al prompt final, venga el
 // template de Supabase o del DEFAULT. Garantiza que el modelo respete las
@@ -252,8 +293,9 @@ export const handler = async (event) => {
     return json(400, { error: 'Ningún producto del bodegón tiene foto.' });
   }
 
-  // 3) Cargar plantilla de prompt (configurable desde Settings)
+  // 3) Cargar plantilla de prompt y calidad de imagen (configurables desde Settings)
   let template = DEFAULT_PROMPT_TEMPLATE;
+  let quality = 'quality'; // por defecto: máxima calidad (Pro primero)
   try {
     const { data: setting } = await supabase
       .from('settings')
@@ -262,12 +304,21 @@ export const handler = async (event) => {
       .maybeSingle();
     if (setting?.value && typeof setting.value === 'string') template = setting.value;
   } catch {}
+  try {
+    const { data: qSetting } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'image_quality')
+      .maybeSingle();
+    if (qSetting?.value === 'fast' || qSetting?.value === 'quality') quality = qSetting.value;
+  } catch {}
 
   // 4) Construir prompt
   const { block: productsBlock, totalUnits, sorted: sortedProducts } = buildProductsBlock(productsWithQty);
   const prompt = template
     .replace('{PRODUCTS}', productsBlock)
     .replace(/\{N\}/g, String(totalUnits))
+    + '\n\n' + STRUCTURE_RULES
     + '\n\n' + QUANTITY_RULES.replace(/\{N\}/g, String(totalUnits));
 
   // Guardar el prompt usado (para referencia) y mantener estado 'generating'
@@ -292,8 +343,9 @@ export const handler = async (event) => {
   console.log(`[Gemini] descarga de ${refImages.length} imágenes en ${((Date.now() - tImg0) / 1000).toFixed(1)}s`);
 
   // 6) Llamar a Gemini — probamos cada modelo con varias configs hasta dar con la buena
-  const FN_VERSION = 'v3-2026-05-09';
-  console.log(`[Gemini] generate-bodegon ${FN_VERSION} · modelos a probar:`, MODEL_FALLBACKS);
+  const FN_VERSION = 'v4-2026-05-28';
+  const MODEL_FALLBACKS = modelOrder(quality);
+  console.log(`[Gemini] generate-bodegon ${FN_VERSION} · calidad: ${quality} · modelos a probar:`, MODEL_FALLBACKS);
 
   const parts = [{ text: prompt }];
   for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });

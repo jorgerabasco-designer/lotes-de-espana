@@ -26,6 +26,13 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [infoModal, setInfoModal] = useState(null);
 
+  // Calidad de imagen: 'quality' (Gemini Pro, fiel pero lento) | 'fast' (Flash)
+  const [imageQuality, setImageQuality] = useState('quality');
+  const changeQuality = async (q) => {
+    setImageQuality(q);
+    try { await setSetting('image_quality', q); } catch (e) { console.error(e); }
+  };
+
   const handleDiagnose = async () => {
     setDiagBusy(true);
     try {
@@ -66,6 +73,8 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
     (async () => {
       const stored = await getSetting('prompt_template', null);
       if (stored) setPrompt(stored);
+      const q = await getSetting('image_quality', 'quality');
+      if (q === 'fast' || q === 'quality') setImageQuality(q);
     })();
   }, []);
 
@@ -127,9 +136,36 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
           {section === 'prompt' && (
             <div className="set-block">
               <div className="set-blockh">
+                <h3>Calidad de imagen</h3>
+                <p>Elige el motor de Gemini con el que se generan los bodegones. Puedes cambiarlo cuando quieras.</p>
+              </div>
+              <div className="quality-row">
+                <button
+                  className={`quality-opt ${imageQuality === 'quality' ? 'on' : ''}`}
+                  onClick={() => changeQuality('quality')}
+                >
+                  <div className="quality-opt-h">
+                    <span className="quality-opt-t">Máxima calidad</span>
+                    {imageQuality === 'quality' && <span className="quality-check">{I.check({ size: 13 })}</span>}
+                  </div>
+                  <div className="quality-opt-s">Gemini 3 Pro · más fiel a etiquetas y orientación · 2-4 min con muchos productos. Recomendado para lo que enseñas al cliente.</div>
+                </button>
+                <button
+                  className={`quality-opt ${imageQuality === 'fast' ? 'on' : ''}`}
+                  onClick={() => changeQuality('fast')}
+                >
+                  <div className="quality-opt-h">
+                    <span className="quality-opt-t">Rápido</span>
+                    {imageQuality === 'fast' && <span className="quality-check">{I.check({ size: 13 })}</span>}
+                  </div>
+                  <div className="quality-opt-s">Gemini Flash · ~30s, pero a veces cambia etiquetas o tumba botellas. Bueno para borradores.</div>
+                </button>
+              </div>
+
+              <div className="set-blockh" style={{ marginTop: 32 }}>
                 <h3>Prompt de generación</h3>
                 <p>
-                  Plantilla base que Gemini utiliza para generar bodegones. Las variables <code>{'{PRODUCTS}'}</code> y <code>{'{N}'}</code> se sustituyen automáticamente al pulsar "Generar bodegón" usando los productos seleccionados, sus dimensiones reales y su posición sugerida (TRASERA / MEDIA / DELANTERA).
+                  Plantilla base que Gemini utiliza para generar bodegones. Las variables <code>{'{PRODUCTS}'}</code> y <code>{'{N}'}</code> se sustituyen automáticamente al pulsar "Generar bodegón" usando los productos seleccionados, sus dimensiones reales y su posición sugerida (TRASERA / MEDIA / DELANTERA). Las reglas de orientación (botellas de pie) y fidelidad de etiquetas se añaden siempre de forma automática.
                 </p>
               </div>
               <div className="set-promptframe">
@@ -271,6 +307,16 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
 
         .set-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
         .set-saved{margin-top:12px;font-size:12.5px;color:var(--olive);font-weight:600}
+
+        .quality-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+        .quality-opt{text-align:left;padding:16px;border:1.5px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;transition:all .15s;font-family:inherit}
+        .quality-opt:hover{border-color:#cdc4b3}
+        .quality-opt.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent)}
+        .quality-opt-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+        .quality-opt-t{font-family:'Fraunces',serif;font-size:16px;font-weight:500;color:var(--ink)}
+        .quality-check{width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;flex-shrink:0}
+        .quality-opt-s{font-size:12px;color:var(--muted);line-height:1.5}
+        @media (max-width: 700px){ .quality-row{grid-template-columns:1fr} }
 
         .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:550;transition:all .15s;border:1px solid transparent}
         .btn:disabled{opacity:.55;cursor:not-allowed}

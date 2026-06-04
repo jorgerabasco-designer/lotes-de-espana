@@ -376,9 +376,14 @@ export default function App() {
           bodegon={editBodegon}
           products={products}
           onClose={() => setEditBodegon(null)}
-          onConfirm={({ items, title, description }) => {
+          onConfirm={({ items, title, description, tags }) => {
             setEditBodegon(null);
-            handleSpecialOrderConfirm({ items, title, description });
+            handleSpecialOrderConfirm({ items, title, description, tags });
+          }}
+          onSaveMeta={async (id, patch) => {
+            await updateBodegon(id, patch);
+            await refreshHistory();
+            setEditBodegon(null);
           }}
           showInfo={showInfo}
         />
