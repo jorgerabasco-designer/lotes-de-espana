@@ -14,11 +14,13 @@ function formatSecs(s) {
 }
 
 // Etiqueta corta del modelo para mostrar en la card / lightbox.
-// 'gemini-3-pro-image-preview' → 'Pro'
+// 'gemini-3-pro-image-preview'          → 'Pro'
 // 'gemini-3.1-flash-image-preview' / 'gemini-2.5-flash-image' → 'Flash'
+// 'seedream-v4-edit'                    → 'Seedream'
 function modelLabel(name) {
   if (!name) return null;
   const n = String(name).toLowerCase();
+  if (n.includes('seedream')) return 'Seedream';
   if (n.includes('pro')) return 'Pro';
   if (n.includes('flash')) return 'Flash';
   return name;
@@ -462,6 +464,7 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         .hthumb-model{padding:1px 6px;border-radius:99px;font-size:9px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;background:#fff;color:var(--ink)}
         .hthumb-model.pro{background:var(--accent);color:#fff}
         .hthumb-model.flash{background:#EAB23E;color:#3a2c0e}
+        .hthumb-model.seedream{background:#2F4A3D;color:#fff}
         .hthumb-tags{position:absolute;bottom:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:4px}
         .hthumb-tag{padding:2px 8px;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-radius:99px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;border:1px solid var(--accent-soft)}
         .hthumb-tag.more{color:var(--ink-2);background:rgba(255,255,255,.7);border-color:transparent}

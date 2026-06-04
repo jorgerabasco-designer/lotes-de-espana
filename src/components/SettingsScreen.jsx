@@ -74,7 +74,7 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
       const stored = await getSetting('prompt_template', null);
       if (stored) setPrompt(stored);
       const q = await getSetting('image_quality', 'quality');
-      if (q === 'fast' || q === 'quality') setImageQuality(q);
+      if (q === 'fast' || q === 'quality' || q === 'seedream') setImageQuality(q);
     })();
   }, []);
 
@@ -148,7 +148,17 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
                     <span className="quality-opt-t">Máxima calidad</span>
                     {imageQuality === 'quality' && <span className="quality-check">{I.check({ size: 13 })}</span>}
                   </div>
-                  <div className="quality-opt-s">Gemini 3 Pro · más fiel a etiquetas y orientación · 2-4 min con muchos productos. Recomendado para lo que enseñas al cliente.</div>
+                  <div className="quality-opt-s"><b>Gemini 3 Pro</b> · más fiel a etiquetas. 2-7 min con muchos productos. Sin fallback a Flash: si falla, te avisa.</div>
+                </button>
+                <button
+                  className={`quality-opt seedream ${imageQuality === 'seedream' ? 'on' : ''}`}
+                  onClick={() => changeQuality('seedream')}
+                >
+                  <div className="quality-opt-h">
+                    <span className="quality-opt-t">Seedream</span>
+                    {imageQuality === 'seedream' && <span className="quality-check">{I.check({ size: 13 })}</span>}
+                  </div>
+                  <div className="quality-opt-s"><b>Seedream 4 (fal.ai)</b> · ~15-30s, fidelidad comparable a Pro. Requiere FAL_KEY en Netlify.</div>
                 </button>
                 <button
                   className={`quality-opt ${imageQuality === 'fast' ? 'on' : ''}`}
@@ -158,7 +168,7 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
                     <span className="quality-opt-t">Rápido</span>
                     {imageQuality === 'fast' && <span className="quality-check">{I.check({ size: 13 })}</span>}
                   </div>
-                  <div className="quality-opt-s">Gemini Flash · ~30s, pero a veces cambia etiquetas o tumba botellas. Bueno para borradores.</div>
+                  <div className="quality-opt-s"><b>Gemini Flash</b> · ~30s, pero a veces cambia etiquetas o tumba botellas. Bueno para borradores.</div>
                 </button>
               </div>
 
@@ -308,7 +318,7 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
         .set-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
         .set-saved{margin-top:12px;font-size:12.5px;color:var(--olive);font-weight:600}
 
-        .quality-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+        .quality-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
         .quality-opt{text-align:left;padding:16px;border:1.5px solid var(--line);border-radius:12px;background:#fff;cursor:pointer;transition:all .15s;font-family:inherit}
         .quality-opt:hover{border-color:#cdc4b3}
         .quality-opt.on{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent)}
@@ -316,7 +326,8 @@ export default function SettingsScreen({ products = [], onProductsChanged }) {
         .quality-opt-t{font-family:'Fraunces',serif;font-size:16px;font-weight:500;color:var(--ink)}
         .quality-check{width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;flex-shrink:0}
         .quality-opt-s{font-size:12px;color:var(--muted);line-height:1.5}
-        @media (max-width: 700px){ .quality-row{grid-template-columns:1fr} }
+        .quality-opt-s b{color:var(--ink-2);font-weight:600}
+        @media (max-width: 900px){ .quality-row{grid-template-columns:1fr} }
 
         .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border-radius:10px;font-size:13px;font-weight:550;transition:all .15s;border:1px solid transparent}
         .btn:disabled{opacity:.55;cursor:not-allowed}

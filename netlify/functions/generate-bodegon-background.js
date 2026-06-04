@@ -373,64 +373,121 @@ export const handler = async (event) => {
   const refImages = refResults.filter(Boolean);
   console.log(`[Gemini] descarga de ${refImages.length} imágenes en ${((Date.now() - tImg0) / 1000).toFixed(1)}s`);
 
-  // 6) Llamar a Gemini — probamos cada modelo con varias configs hasta dar con la buena
-  const FN_VERSION = 'v4-2026-05-28';
-  const MODEL_FALLBACKS = modelOrder(quality);
-  console.log(`[Gemini] generate-bodegon ${FN_VERSION} · calidad: ${quality} · modelos a probar:`, MODEL_FALLBACKS);
-
-  const parts = [{ text: prompt }];
-  for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
-
-  // Variantes simplificadas: la API v1 no acepta responseModalities, así que solo v1beta.
-  const REQUEST_VARIANTS = [
-    { name: 'v1beta + responseModalities[IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
-    { name: 'v1beta + responseModalities[TEXT,IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
-  ];
+  // 6) Llamar al motor de imagen — Seedream 4 vía fal.ai si quality==='seedream',
+  //    Gemini en cualquier otro caso. Compartimos prompt y refImages.
+  const FN_VERSION = 'v5-2026-06-04';
+  console.log(`[bodegón] ${FN_VERSION} · calidad: ${quality}`);
 
   let imageBase64 = null;
   let imageMime = 'image/png';
   let usedModel = null;
   const allErrors = []; // [{model, variant, error}]
 
-  outer:
-  for (const model of MODEL_FALLBACKS) {
-    for (const variant of REQUEST_VARIANTS) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/${variant.apiVersion}/models/${model}:generateContent?key=${geminiKey}`;
-        const r = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(variant.body),
-        });
-        const j = await r.json();
-        if (!r.ok) {
-          const err = j?.error?.message || `HTTP ${r.status}`;
-          allErrors.push({ model, variant: variant.name, error: err });
-          console.warn(`[Gemini] ${model} (${variant.name}) →`, err);
-          continue;
-        }
-        const cand = j?.candidates?.[0];
-        const partsOut = cand?.content?.parts || [];
-        for (const part of partsOut) {
-          if (part.inlineData?.data) {
-            imageBase64 = part.inlineData.data;
-            imageMime = part.inlineData.mimeType || 'image/png';
-            usedModel = `${model} (${variant.name})`;
-            break;
+  if (quality === 'seedream') {
+    // ----------- Seedream 4 Edit vía fal.ai -----------
+    const falKey = process.env.FAL_KEY;
+    if (!falKey) {
+      const m = 'Falta la variable FAL_KEY en Netlify para usar Seedream. Ve a Site settings → Environment variables y pega tu API key de fal.ai.';
+      await markFailed(supabase, ref, m);
+      return json(500, { error: m });
+    }
+    // Seedream acepta URLs públicas. Las imágenes están en bucket público.
+    const refUrls = sortedProducts.map(r => {
+      const { data } = supabase.storage.from('productos').getPublicUrl(r.foto_path);
+      return data.publicUrl;
+    });
+    try {
+      const tSr = Date.now();
+      const sr = await fetch('https://fal.run/fal-ai/bytedance/seedream/v4/edit', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Key ${falKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt,
+          image_urls: refUrls,
+          image_size: { width: 1664, height: 1248 }, // 4:3, ~2 MP
+        }),
+      });
+      const srText = await sr.text();
+      let srJson;
+      try { srJson = JSON.parse(srText); } catch { srJson = null; }
+      if (!sr.ok) {
+        const m = srJson?.detail || srJson?.error || srText || `HTTP ${sr.status}`;
+        throw new Error(typeof m === 'string' ? m : JSON.stringify(m));
+      }
+      const outUrl = srJson?.images?.[0]?.url;
+      if (!outUrl) throw new Error('Seedream respondió sin imagen.');
+      // Descargar la imagen generada para subirla a nuestro storage.
+      const imgRes = await fetch(outUrl);
+      if (!imgRes.ok) throw new Error(`No se pudo descargar la imagen generada (${imgRes.status}).`);
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      imageBase64 = buf.toString('base64');
+      imageMime = imgRes.headers.get('content-type') || 'image/jpeg';
+      usedModel = 'seedream-v4-edit';
+      console.log(`[Seedream] ✓ imagen en ${((Date.now() - tSr) / 1000).toFixed(1)}s`);
+    } catch (e) {
+      const m = `Seedream falló: ${e.message || String(e)}`;
+      console.error('[Seedream]', m);
+      allErrors.push({ model: 'seedream-v4-edit', variant: 'fal.ai', error: m });
+    }
+  } else {
+    // ----------- Gemini (Pro o Flash) -----------
+    const MODEL_FALLBACKS = modelOrder(quality);
+    console.log(`[Gemini] modelos a probar:`, MODEL_FALLBACKS);
+
+    const parts = [{ text: prompt }];
+    for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+
+    // Variantes simplificadas: la API v1 no acepta responseModalities, así que solo v1beta.
+    const REQUEST_VARIANTS = [
+      { name: 'v1beta + responseModalities[IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
+      { name: 'v1beta + responseModalities[TEXT,IMAGE]', apiVersion: 'v1beta', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
+    ];
+
+    geminiLoop: {
+      for (const model of MODEL_FALLBACKS) {
+        for (const variant of REQUEST_VARIANTS) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/${variant.apiVersion}/models/${model}:generateContent?key=${geminiKey}`;
+            const r = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(variant.body),
+            });
+            const j = await r.json();
+            if (!r.ok) {
+              const err = j?.error?.message || `HTTP ${r.status}`;
+              allErrors.push({ model, variant: variant.name, error: err });
+              console.warn(`[Gemini] ${model} (${variant.name}) →`, err);
+              continue;
+            }
+            const cand = j?.candidates?.[0];
+            const partsOut = cand?.content?.parts || [];
+            for (const part of partsOut) {
+              if (part.inlineData?.data) {
+                imageBase64 = part.inlineData.data;
+                imageMime = part.inlineData.mimeType || 'image/png';
+                usedModel = `${model} (${variant.name})`;
+                break;
+              }
+            }
+            if (imageBase64) {
+              console.log(`[Gemini] ✓ Imagen generada con ${usedModel}`);
+              break geminiLoop;
+            }
+            allErrors.push({ model, variant: variant.name, error: 'respuesta sin imagen' });
+          } catch (e) {
+            const err = e.message || String(e);
+            allErrors.push({ model, variant: variant.name, error: err });
+            console.warn(`[Gemini] ${model} (${variant.name}) excepción:`, err);
           }
         }
-        if (imageBase64) {
-          console.log(`[Gemini] ✓ Imagen generada con ${usedModel}`);
-          break outer;
-        }
-        allErrors.push({ model, variant: variant.name, error: 'respuesta sin imagen' });
-      } catch (e) {
-        const err = e.message || String(e);
-        allErrors.push({ model, variant: variant.name, error: err });
-        console.warn(`[Gemini] ${model} (${variant.name}) excepción:`, err);
       }
     }
   }
+
 
   if (!imageBase64) {
     // Lista los modelos disponibles
@@ -465,12 +522,13 @@ export const handler = async (event) => {
         'Para 100 bodegones al mes con Pro = ~$4 USD.';
     } else {
       const detail = allErrors.map(e => `• ${e.model} [${e.variant}]: ${e.error}`).join('\n');
-      const strictPro = quality === 'quality';
-      msg = strictPro
-        ? `Gemini 3 Pro no consiguió generar la imagen esta vez. Te lo decimos en vez de caer a Flash silenciosamente, porque querías máxima calidad.\n\nQué hacer:\n• Pulsa Regenerar — los errores transitorios de Pro son frecuentes.\n• Si sigue fallando, ve a Configuración → Calidad de imagen → Rápido para generar con Flash (peor calidad pero suele funcionar).\n\nDetalle técnico:\n${detail}`
-        : `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle:\n${detail}`;
-      if (availableImageModels.length && !strictPro) {
-        msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
+      if (quality === 'seedream') {
+        msg = `Seedream 4 (fal.ai) no consiguió generar la imagen.\n\nQué hacer:\n• Pulsa Regenerar.\n• Si sigue fallando, comprueba que FAL_KEY esté bien en Netlify y que tu cuenta de fal.ai tenga saldo.\n• O cambia a otro motor en Configuración → Calidad de imagen.\n\nDetalle técnico:\n${detail}`;
+      } else if (quality === 'quality') {
+        msg = `Gemini 3 Pro no consiguió generar la imagen esta vez. Te lo decimos en vez de caer a Flash silenciosamente, porque querías máxima calidad.\n\nQué hacer:\n• Pulsa Regenerar — los errores transitorios de Pro son frecuentes.\n• Si sigue fallando, ve a Configuración → Calidad de imagen → Rápido (Flash) o Seedream para generar con otro motor.\n\nDetalle técnico:\n${detail}`;
+      } else {
+        msg = `[${FN_VERSION}] Ningún modelo de Gemini consiguió generar la imagen.\n\nDetalle:\n${detail}`;
+        if (availableImageModels.length) msg += `\n\nModelos disponibles en tu API key: ${availableImageModels.join(', ')}.`;
       }
     }
 
