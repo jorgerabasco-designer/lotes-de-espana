@@ -109,18 +109,28 @@ const STRUCTURE_RULES = `
 ================================================================
 TOP-LEVEL RULES — VIOLATING ANY OF THESE MAKES THE IMAGE USELESS
 ================================================================
-Read these three rules before drawing anything. If your output
+Read these four rules before drawing anything. If your output
 violates any of them, the entire image is wrong and must be redone:
 
-  1. EVERY BOTTLE STANDS UPRIGHT, VERTICAL, LABEL TO THE CAMERA.
+  1. THE OUTPUT IMAGE IS HORIZONTAL 4:3. WIDER THAN TALL.
+     Imagine a wide rectangular Spanish gift hamper (cesta de
+     Navidad) photographed from the front. NEVER a tall, vertical
+     or portrait image. NEVER a vertical collage of products stacked
+     top-to-bottom with empty white gaps between rows.
+  2. EVERY BOTTLE STANDS UPRIGHT, VERTICAL, LABEL TO THE CAMERA.
      No tilting. No lying on its side. No diagonal. Ever.
-  2. EVERY LABEL IS IDENTICAL TO ITS REFERENCE IMAGE.
+  3. EVERY LABEL IS IDENTICAL TO ITS REFERENCE IMAGE.
      No invention. No "similar" version. No variant substitution.
      No re-coloured, simplified or modernised version.
-  3. EVERY PRODUCT APPEARS EXACTLY ITS DECLARED QUANTITY OF TIMES.
+  4. EVERY PRODUCT APPEARS EXACTLY ITS DECLARED QUANTITY OF TIMES.
      No more, no less. No "borrowing" units between products.
 
-Hold these three rules at the top of your mind the entire time.
+Hold these four rules at the top of your mind the entire time.
+
+If the image you are about to output is taller than wide, or looks
+like a column of products stacked vertically with white space
+between them, STOP and redo it as a wide horizontal composition.
+This is non-negotiable.
 
 ================================================================
 PLACEMENT & FIDELITY — STRICT, NON-NEGOTIABLE
@@ -455,7 +465,12 @@ export const handler = async (event) => {
   const parts = [{ text: prompt }];
   for (const img of refImages) parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
 
+  // Probamos primero forzando el aspect ratio 4:3 horizontal vía imageConfig
+  // (más vinculante que pedirlo solo por texto, que Pro a veces ignora y
+  // suelta una imagen vertical). Si la API no lo soporta para este modelo,
+  // las dos variantes siguientes caen al comportamiento anterior.
   const REQUEST_VARIANTS = [
+    { name: 'imageConfig 4:3', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '4:3' } } } },
     { name: 'responseModalities[IMAGE]', body: { contents: [{ parts }], generationConfig: { responseModalities: ['IMAGE'] } } },
     { name: 'responseModalities[TEXT,IMAGE]', body: { contents: [{ parts }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } },
   ];
