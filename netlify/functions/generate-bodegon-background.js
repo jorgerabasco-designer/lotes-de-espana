@@ -109,7 +109,7 @@ const STRUCTURE_RULES = `
 ================================================================
 TOP-LEVEL RULES — VIOLATING ANY OF THESE MAKES THE IMAGE USELESS
 ================================================================
-Read these four rules before drawing anything. If your output
+Read these five rules before drawing anything. If your output
 violates any of them, the entire image is wrong and must be redone:
 
   1. THE OUTPUT IMAGE IS HORIZONTAL 4:3. WIDER THAN TALL.
@@ -124,8 +124,16 @@ violates any of them, the entire image is wrong and must be redone:
      No re-coloured, simplified or modernised version.
   4. EVERY PRODUCT APPEARS EXACTLY ITS DECLARED QUANTITY OF TIMES.
      No more, no less. No "borrowing" units between products.
+  5. RESPECT THE REAL-WORLD DIMENSIONS OF EACH PRODUCT.
+     Each PRODUCT #N below has a "Real physical size" field in cm
+     (alto × ancho × fondo). Their relative sizes in the image must
+     match these numbers — a 30 cm bottle is ~5× taller than a 6 cm
+     jar, a 26 cm flat box is ~4× wider than a 6 cm cube. Never
+     draw all products at the same size, never make a small jar
+     bigger than a tall bottle, never shrink a paleta ibérica down
+     to the size of a turrón box.
 
-Hold these four rules at the top of your mind the entire time.
+Hold these five rules at the top of your mind the entire time.
 
 If the image you are about to output is taller than wide, or looks
 like a column of products stacked vertically with white space
@@ -213,6 +221,12 @@ Before producing the image, mentally answer YES to ALL of these:
   □ Does the count of every product match its QUANTITY exactly?
     (If you accidentally drew 2 NOS oil bottles when the QUANTITY
     was 1, or only 1 Siderit gin when the QUANTITY was 2 → REDO.)
+
+  □ Do the relative sizes of products match their real-world cm
+    dimensions? Look at each product's "Real physical size" field.
+    (If a 30 cm wine bottle appears the same height as an 8 cm
+    jar, or a 5 kg jamón leg looks the same size as a 100 g
+    turrón box → REDO with correct proportions.)
 
   □ Are there 3 or fewer depth layers (BACK / MIDDLE / FRONT)?
     (4+ stacked vertical rows → REDO with wider horizontal spread.)
