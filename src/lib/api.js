@@ -200,6 +200,34 @@ export async function listBodegones() {
   return (data || []).map(rowToBodegon);
 }
 
+// Bodegones que están en cola (generating | draft | failed). Se usa al cargar
+// la app para recuperar las generaciones que estaban en marcha cuando el
+// usuario recargó / cerró el navegador.
+export async function listInProgress() {
+  if (!SUPABASE_READY) return [];
+  const { data, error } = await supabase
+    .from('bodegones')
+    .select('*')
+    .in('estado', ['generating', 'draft', 'failed'])
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(row => {
+    const items = normalizeProductos(row.productos);
+    return {
+      ref: row.ref,
+      title: row.nombre || `Bodegón IA #${row.numero}`,
+      description: row.descripcion || '',
+      tags: Array.isArray(row.tags) ? row.tags : [],
+      items,
+      status: row.estado,
+      image: row.imagen_path ? publicUrl('bodegones', row.imagen_path) : null,
+      image_path: row.imagen_path || null,
+      error: row.error_mensaje || null,
+      t0: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    };
+  });
+}
+
 // Promueve un bodegón en estado 'draft' a 'completed' (lo añade al historial)
 export async function commitBodegon(ref, patch = {}) {
   if (!SUPABASE_READY) return null;

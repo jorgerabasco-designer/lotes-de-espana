@@ -107,6 +107,22 @@ The final image must contain EXACTLY {N} product units in total, matching the QU
 // cambiar/intercambiar etiquetas.
 const STRUCTURE_RULES = `
 ================================================================
+TOP-LEVEL RULES — VIOLATING ANY OF THESE MAKES THE IMAGE USELESS
+================================================================
+Read these three rules before drawing anything. If your output
+violates any of them, the entire image is wrong and must be redone:
+
+  1. EVERY BOTTLE STANDS UPRIGHT, VERTICAL, LABEL TO THE CAMERA.
+     No tilting. No lying on its side. No diagonal. Ever.
+  2. EVERY LABEL IS IDENTICAL TO ITS REFERENCE IMAGE.
+     No invention. No "similar" version. No variant substitution.
+     No re-coloured, simplified or modernised version.
+  3. EVERY PRODUCT APPEARS EXACTLY ITS DECLARED QUANTITY OF TIMES.
+     No more, no less. No "borrowing" units between products.
+
+Hold these three rules at the top of your mind the entire time.
+
+================================================================
 PLACEMENT & FIDELITY — STRICT, NON-NEGOTIABLE
 ================================================================
 COMPOSITION SHAPE (top priority — the most common error is stacking
@@ -167,7 +183,35 @@ GROUND TRUTH RULE:
   shadows. You are NOT redesigning, regenerating or reimagining them.
 - Think of it like building a real gift hamper with real products on a
   table and photographing it: the products are what they are. You only
-  decide where to place them.`;
+  decide where to place them.
+
+================================================================
+FINAL VERIFICATION CHECKLIST — DO THIS BEFORE OUTPUTTING
+================================================================
+Before producing the image, mentally answer YES to ALL of these:
+
+  □ Is EVERY bottle, jar, tin and tall package standing UPRIGHT
+    and VERTICAL, with its label facing the camera?
+    (If any bottle is tilted, lying or diagonal → REDO before output.)
+
+  □ Is EVERY label IDENTICAL to its reference image — same brand,
+    same wording, same logo, same colours, same illustration,
+    same typography?
+    (If any label looks invented, modified, swapped, or is a
+    different variant of the same brand → REDO before output.)
+
+  □ Does the count of every product match its QUANTITY exactly?
+    (If you accidentally drew 2 NOS oil bottles when the QUANTITY
+    was 1, or only 1 Siderit gin when the QUANTITY was 2 → REDO.)
+
+  □ Are there 3 or fewer depth layers (BACK / MIDDLE / FRONT)?
+    (4+ stacked vertical rows → REDO with wider horizontal spread.)
+
+  □ Is the composition wider than tall (75-90% width, 55-70% height)?
+    (Taller than wide → REDO with horizontal spread.)
+
+If any answer is NO, recompose internally and only THEN output.
+Wrong outputs cost the customer real money and credibility.`;
 
 // Reglas de cantidad — se concatenan SIEMPRE al prompt final, venga el
 // template de Supabase o del DEFAULT. Garantiza que el modelo respete las

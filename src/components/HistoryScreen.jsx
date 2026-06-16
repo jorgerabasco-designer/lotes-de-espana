@@ -65,7 +65,7 @@ function bucketLabel(d) {
   return d === 0 ? 'Hoy' : d === 1 ? 'Ayer' : d <= 6 ? 'Esta semana' : d <= 30 ? 'Este mes' : 'Anteriores';
 }
 
-export default function HistoryScreen({ products, history, onRename, onDelete, onRefresh, onEdit }) {
+export default function HistoryScreen({ products, history, activeGens = [], onRename, onDelete, onRefresh, onEdit, onViewGen }) {
   const { tagLabels } = useTaxonomy();
   const [range, setRange] = useState('all');
   const [q, setQ] = useState('');
@@ -219,7 +219,18 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
       </div>
 
       <div className="hist-main">
-        {groups.length === 0 && (
+        {/* COLA — generaciones en marcha (generating / draft / failed). Se
+            muestra siempre al principio del historial mientras haya alguna. */}
+        {activeGens.length > 0 && (
+          <InProgressGroup
+            gens={activeGens}
+            products={products}
+            tagLabels={tagLabels}
+            onOpen={onViewGen}
+          />
+        )}
+
+        {groups.length === 0 && activeGens.length === 0 && (
           <div className="hist-empty">
             <div className="hist-empty-icon">{I.history({ size: 28 })}</div>
             <div className="hist-empty-t">Aún no hay bodegones</div>
@@ -613,5 +624,114 @@ export default function HistoryScreen({ products, history, onRename, onDelete, o
         </div>
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "En curso" — cola de bodegones generándose / pendientes de revisar / fallados.
+// ---------------------------------------------------------------------------
+function InProgressGroup({ gens, products, tagLabels, onOpen }) {
+  // Tick para que el contador de tiempo se mueva en las cards generating.
+  const [, force] = React.useState(0);
+  React.useEffect(() => {
+    if (!gens.some(g => g.status === 'generating')) return;
+    const t = setInterval(() => force(x => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [gens]);
+
+  if (!gens || gens.length === 0) return null;
+  const sorted = [...gens].sort((a, b) => (b.t0 || 0) - (a.t0 || 0));
+
+  return (
+    <div className="hist-group hist-inprogress">
+      <div className="hist-group-h">
+        <span className="hist-group-l">En curso</span>
+        <span className="hist-group-c">
+          {sorted.length} {sorted.length === 1 ? 'bodegón' : 'bodegones'}
+        </span>
+        <div className="hist-group-line"/>
+      </div>
+
+      <div className="ip-list">
+        {sorted.map(g => {
+          const elapsed = g.t0 ? Math.max(0, Math.round((Date.now() - g.t0) / 1000)) : 0;
+          const m = Math.floor(elapsed / 60);
+          const s = elapsed % 60;
+          const elapsedStr = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+          const nItems = (g.items || []).length;
+          const totalUnits = (g.items || []).reduce((sum, it) => sum + (it.qty || 1), 0);
+          const tagChips = (g.tags || []).filter(t => tagLabels[t]);
+
+          return (
+            <button
+              key={g.ref}
+              type="button"
+              className={`ip-card ip-${g.status}`}
+              onClick={() => onOpen && onOpen(g.ref)}
+              title={
+                g.status === 'generating'
+                  ? 'Generación en curso · pulsa para abrir'
+                  : g.status === 'draft'
+                    ? 'Bodegón listo · pulsa para revisar'
+                    : 'Generación fallida · pulsa para ver detalle'
+              }
+            >
+              <div className="ip-thumb">
+                {g.status === 'generating' && <div className="ip-spin"/>}
+                {g.status === 'draft' && g.image && <img src={g.image} alt={g.title}/>}
+                {g.status === 'draft' && !g.image && <div className="ip-check">{I.check({ size: 22 })}</div>}
+                {g.status === 'failed' && <div className="ip-err">!</div>}
+              </div>
+              <div className="ip-body">
+                <div className="ip-title">{g.title}</div>
+                <div className="ip-meta">
+                  {nItems} productos
+                  {totalUnits > nItems && ` · ${totalUnits} unidades`}
+                  {g.status === 'generating' && ` · ${elapsedStr}`}
+                </div>
+                {tagChips.length > 0 && (
+                  <div className="ip-tags">
+                    {tagChips.slice(0, 4).map(t => <span key={t} className="ip-tag">{tagLabels[t]}</span>)}
+                  </div>
+                )}
+                <div className="ip-status">
+                  {g.status === 'generating' && 'Generando con Gemini Pro… (pulsa para ver)'}
+                  {g.status === 'draft' && 'Listo · pulsa para revisar y guardar'}
+                  {g.status === 'failed' && (g.error ? g.error.slice(0, 90) + (g.error.length > 90 ? '…' : '') : 'Error en la generación · pulsa para detalles')}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <style>{`
+        .hist-inprogress .hist-group-l{color:var(--accent)}
+
+        .ip-list{display:flex;flex-direction:column;gap:8px}
+        .ip-card{display:flex;gap:14px;align-items:stretch;padding:12px 14px;background:#fff;border:1.5px solid var(--line);border-radius:14px;cursor:pointer;transition:all .15s;font-family:inherit;text-align:left;width:100%}
+        .ip-card:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 8px 22px -10px rgba(167,77,74,.28)}
+        .ip-card.ip-generating{border-color:var(--accent-soft)}
+        .ip-card.ip-draft{border-color:var(--accent);background:rgba(167,77,74,.04);animation:ipReady 1.8s ease-in-out infinite}
+        @keyframes ipReady{0%,100%{box-shadow:0 8px 22px -10px rgba(167,77,74,.28)}50%{box-shadow:0 12px 26px -8px rgba(167,77,74,.45)}}
+        .ip-card.ip-failed{border-color:rgba(167,77,74,.55)}
+
+        .ip-thumb{width:78px;height:78px;border-radius:10px;background:var(--bg);display:grid;place-items:center;flex-shrink:0;overflow:hidden}
+        .ip-thumb img{width:100%;height:100%;object-fit:cover}
+        .ip-spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation: ipSpin .9s linear infinite}
+        @keyframes ipSpin{to{transform:rotate(360deg)}}
+        .ip-check{color:var(--accent)}
+        .ip-err{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-family:'Fraunces',serif;font-weight:700;font-size:18px}
+
+        .ip-body{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+        .ip-title{font-family:'Fraunces',serif;font-size:16px;font-weight:500;color:var(--ink);line-height:1.2;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .ip-meta{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+        .ip-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+        .ip-tag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);padding:2px 7px;border-radius:99px;font-weight:700}
+        .ip-status{font-size:11.5px;color:var(--ink-2);margin-top:2px;line-height:1.4}
+        .ip-card.ip-draft .ip-status{color:var(--accent);font-weight:600}
+        .ip-card.ip-failed .ip-status{color:var(--accent)}
+      `}</style>
+    </div>
   );
 }

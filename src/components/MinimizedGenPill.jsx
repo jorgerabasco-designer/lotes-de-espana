@@ -1,74 +1,94 @@
 import React, { useEffect, useState } from 'react';
 import { I } from './icons.jsx';
 
-// Píldora flotante que aparece abajo-izquierda cuando el overlay del bodegón
-// está cerrado pero hay una generación viva (Pro tarda 2-7 min y queremos que
-// el usuario pueda seguir trabajando mientras tanto).
+// Píldora flotante que aparece abajo-izquierda. En cola múltiple, muestra
+// la generación más RECIENTE que no se esté viendo en el overlay grande.
+// Si hay varias minimizadas, abajo de la principal se ve un contador
+// "+N más en cola" que es clickable y abre Historial → En curso.
 //
-// Estados:
+// Estados de la principal:
 //   · generating → spinner + título + tiempo transcurrido
 //   · draft      → "Bodegón listo · Ver" pulsando suave
 //   · failed     → ícono de error + mensaje breve
-export default function MinimizedGenPill({ activeGen, visible, onOpen, onCancel }) {
+export default function MinimizedGenPill({ activeGens = [], viewingRef, onOpen, onCancel }) {
   // Tick cada segundo para el contador de tiempo.
   const [, setNow] = useState(Date.now());
+
+  // Filtramos las gens que NO están siendo vistas en el overlay grande.
+  // Mostramos la más reciente (último elemento del array, que se va añadiendo
+  // al final en startBodegon).
+  const minimized = activeGens.filter(g => g.ref !== viewingRef);
+  const main = minimized[minimized.length - 1] || null;
+  const others = minimized.length - 1;
+  const hasGenerating = minimized.some(g => g.status === 'generating');
+
   useEffect(() => {
-    if (!visible || activeGen?.status !== 'generating') return;
+    if (!hasGenerating) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [visible, activeGen?.status]);
+  }, [hasGenerating]);
 
-  if (!visible || !activeGen) return null;
+  if (!main) return null;
 
-  const elapsed = activeGen.t0 ? Math.max(0, Math.round((Date.now() - activeGen.t0) / 1000)) : 0;
+  const elapsed = main.t0 ? Math.max(0, Math.round((Date.now() - main.t0) / 1000)) : 0;
   const m = Math.floor(elapsed / 60);
   const s = elapsed % 60;
   const elapsedStr = m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
 
-  const status = activeGen.status;
+  const status = main.status;
+  const activeGen = main; // alias para no tocar el resto del JSX
 
   return (
-    <div className={`mgp ${status}`} role="status" aria-live="polite">
-      <button className="mgp-main" onClick={onOpen} title={status === 'draft' ? 'Abrir bodegón listo' : 'Abrir generación'}>
-        {status === 'generating' && (
-          <>
-            <span className="mgp-spin"/>
-            <span className="mgp-text">
-              <span className="mgp-t">Generando bodegón…</span>
-              <span className="mgp-s">{activeGen.title} · {elapsedStr}</span>
-            </span>
-          </>
-        )}
-        {status === 'draft' && (
-          <>
-            <span className="mgp-check">{I.check({ size: 16 })}</span>
-            <span className="mgp-text">
-              <span className="mgp-t">Bodegón listo</span>
-              <span className="mgp-s">{activeGen.title} · pulsa para revisar</span>
-            </span>
-            <span className="mgp-arrow">{I.expand({ size: 13 })}</span>
-          </>
-        )}
-        {status === 'failed' && (
-          <>
-            <span className="mgp-err">!</span>
-            <span className="mgp-text">
-              <span className="mgp-t">Generación fallida</span>
-              <span className="mgp-s">{activeGen.title} · pulsa para ver detalles</span>
-            </span>
-          </>
-        )}
-      </button>
-      <button
-        className="mgp-x"
-        onClick={(e) => { e.stopPropagation(); onCancel(); }}
-        title={status === 'generating' ? 'Cancelar generación' : 'Descartar borrador'}
-        aria-label="Cancelar"
-      >{I.close({ size: 14 })}</button>
+    <div className="mgp-wrap" role="status" aria-live="polite">
+      <div className={`mgp ${status}`}>
+        <button className="mgp-main" onClick={() => onOpen(main.ref)} title={status === 'draft' ? 'Abrir bodegón listo' : 'Abrir generación'}>
+          {status === 'generating' && (
+            <>
+              <span className="mgp-spin"/>
+              <span className="mgp-text">
+                <span className="mgp-t">Generando bodegón…</span>
+                <span className="mgp-s">{activeGen.title} · {elapsedStr}</span>
+              </span>
+            </>
+          )}
+          {status === 'draft' && (
+            <>
+              <span className="mgp-check">{I.check({ size: 16 })}</span>
+              <span className="mgp-text">
+                <span className="mgp-t">Bodegón listo</span>
+                <span className="mgp-s">{activeGen.title} · pulsa para revisar</span>
+              </span>
+              <span className="mgp-arrow">{I.expand({ size: 13 })}</span>
+            </>
+          )}
+          {status === 'failed' && (
+            <>
+              <span className="mgp-err">!</span>
+              <span className="mgp-text">
+                <span className="mgp-t">Generación fallida</span>
+                <span className="mgp-s">{activeGen.title} · pulsa para ver detalles</span>
+              </span>
+            </>
+          )}
+        </button>
+        <button
+          className="mgp-x"
+          onClick={(e) => { e.stopPropagation(); onCancel(main.ref); }}
+          title={status === 'generating' ? 'Cancelar generación' : 'Descartar borrador'}
+          aria-label="Cancelar"
+        >{I.close({ size: 14 })}</button>
+      </div>
+      {others > 0 && (
+        <div className="mgp-count" title="Hay más bodegones en cola — míralos en Historial → En curso">
+          +{others} más en cola
+        </div>
+      )}
 
       <style>{`
+        .mgp-wrap{position:fixed; left:20px; bottom:20px; z-index:550;display:flex;flex-direction:column;gap:6px;align-items:flex-start;animation: mgpIn .25s cubic-bezier(.2,.8,.2,1)}
+        .mgp-count{font-size:11px;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-weight:600;letter-spacing:.02em;box-shadow:0 4px 12px -4px rgba(45,42,38,.18)}
         .mgp{
-          position:fixed; left:20px; bottom:20px; z-index:550;
+          z-index:550;
           display:flex; align-items:center; gap:0;
           background:#fff; border:1px solid var(--line); border-radius:14px;
           box-shadow:0 14px 38px -10px rgba(45,42,38,.32), 0 4px 12px rgba(45,42,38,.10);
@@ -99,7 +119,8 @@ export default function MinimizedGenPill({ activeGen, visible, onOpen, onCancel 
         .mgp-x:hover{background:var(--accent-soft);color:var(--accent)}
 
         @media (max-width: 600px){
-          .mgp{left:12px;right:12px;bottom:12px;min-width:0;max-width:none}
+          .mgp-wrap{left:12px;right:12px;bottom:12px;align-items:stretch}
+          .mgp{min-width:0;max-width:none}
         }
       `}</style>
     </div>

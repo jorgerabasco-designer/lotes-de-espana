@@ -15,6 +15,7 @@ import {
   listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
   listBodegones, updateBodegon, deleteBodegon,
   startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon,
+  listInProgress,
 } from './lib/api.js';
 import { SUPABASE_READY } from './lib/supabase.js';
 import { useTaxonomy } from './lib/taxonomy.jsx';
@@ -50,22 +51,39 @@ export default function App() {
   const [infoModal, setInfoModal] = useState(null);
   const showInfo = (cfg) => setInfoModal(cfg);
 
-  // Bodegón — generación viva en background con posibilidad de minimizar.
-  // activeGen es la generación en curso (o el draft pendiente de guardar). Su
-  // ciclo de vida sobrevive a que el overlay se cierre (minimizar). bodegonOpen
-  // solo controla si el overlay es visible o no.
+  // Bodegón — COLA de generaciones en background.
+  //   activeGens   array de generaciones vivas (status: generating | draft | failed).
+  //                Cada entrada: { ref, title, description, tags, items, status,
+  //                image, image_path, error, t0 }. Sobreviven a cerrar el overlay
+  //                (minimizar) y, gracias a Supabase, a recargar la página.
+  //   viewingRef   cuál se está viendo en el BodegonOverlay grande. null = cerrado.
+  //                El usuario puede tener N en cola y abrir solo una a la vez.
   const [bodegonNumber, setBodegonNumber] = useState(1);
-  const [bodegonOpen, setBodegonOpen] = useState(false);
-  // activeGen: { ref, title, description, tags, items, status, image, image_path, error, t0 }
-  const [activeGen, setActiveGen] = useState(null);
+  const [activeGens, setActiveGens] = useState([]);
+  const [viewingRef, setViewingRef] = useState(null);
 
-  // Initial load
+  // Helpers para mutar la cola de forma segura.
+  const addGen = (gen) => setActiveGens(gs => [...gs, gen]);
+  const updateGen = (ref, patch) => setActiveGens(gs =>
+    gs.map(g => g.ref === ref ? { ...g, ...patch } : g)
+  );
+  const removeGen = (ref) => setActiveGens(gs => gs.filter(g => g.ref !== ref));
+  const viewingGen = activeGens.find(g => g.ref === viewingRef) || null;
+
+  // Initial load. Recogemos también las generaciones que estaban en cola en
+  // Supabase: si el usuario recargó la web mientras se generaba un bodegón,
+  // al volver lo encuentra en "En curso" sin perder nada.
   useEffect(() => {
     (async () => {
       try {
-        const [ps, bs] = await Promise.all([listProducts(), listBodegones()]);
+        const [ps, bs, queue] = await Promise.all([
+          listProducts(),
+          listBodegones(),
+          listInProgress().catch(() => []),
+        ]);
         setProducts(ps);
         setHistory(bs);
+        if (queue.length) setActiveGens(queue);
         if (bs.length) {
           const max = Math.max(...bs.map(b => b.n || 0), 0);
           setBodegonNumber(max + 1);
@@ -130,42 +148,35 @@ export default function App() {
     }
   };
 
-  // Notifica al sistema (solo si hay permiso y el overlay está cerrado).
-  const notifyBodegonReady = (title) => {
+  // Notifica al sistema (solo si hay permiso y el overlay no muestra ya esa gen).
+  // El click en la notificación abre EL bodegón concreto que terminó.
+  const notifyBodegonReady = (ref, title) => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     try {
       const n = new Notification('Bodegón listo', {
         body: title || 'Tu bodegón está listo para revisar.',
         icon: '/favicon.ico',
-        tag: 'bodegon-listo', // sustituye notificaciones anteriores
+        tag: 'bodegon-' + ref, // tag por gen evita que se sobrescriban entre sí
       });
       n.onclick = () => {
         try { window.focus(); } catch {}
-        setBodegonOpen(true);
+        setViewingRef(ref);
         try { n.close(); } catch {}
       };
     } catch {}
   };
 
-  // Arranca una generación nueva. Centraliza el flujo manual y el de pedidos
-  // especiales / regenerar.
+  // Arranca una generación nueva. Se PERMITE tener varias en cola (multi-gen):
+  // al lanzarla se añade a `activeGens` y se abre el overlay para verla. Si
+  // ya hay otra abierta, se minimiza y la nueva pasa al primer plano.
   const startBodegon = async ({ items, title, description, tags }) => {
-    if (activeGen) {
-      showInfo({
-        icon: 'sparkle', tone: 'info',
-        title: 'Ya hay un bodegón generándose',
-        description: 'Espera a que termine (o cancélalo desde la píldora) antes de iniciar otro.',
-        confirmLabel: 'Entendido', confirmTone: 'neutral',
-      });
-      return;
-    }
     if (!items || items.length < 2) return;
     ensureNotifPermission();
     try {
       const created = await startBodegonGeneration({
         items, title, description: description || '', tags: tags || [],
       });
-      setActiveGen({
+      const gen = {
         ref: created.id,
         title: created.title || title || `Bodegón IA #${bodegonNumber}`,
         description: description || '',
@@ -176,8 +187,10 @@ export default function App() {
         image_path: null,
         error: null,
         t0: Date.now(),
-      });
-      setBodegonOpen(true);
+      };
+      addGen(gen);
+      setViewingRef(created.id);
+      setBodegonNumber(n => n + 1); // siguiente nombre por defecto, sin esperar guardar
     } catch (e) {
       showInfo({
         icon: 'trash', tone: 'danger',
@@ -188,36 +201,36 @@ export default function App() {
     }
   };
 
-  // Effect de polling — sobrevive al cierre del overlay. Cuando termina,
-  // si el overlay está cerrado, notifica al sistema.
-  const overlayOpenRef = React.useRef(false);
-  overlayOpenRef.current = bodegonOpen;
+  // Polling MULTI — un poll por cada gen en 'generating'. pollingRefs guarda
+  // los refs con un poll en curso para no duplicar al re-renderizar.
+  const pollingRefs = React.useRef(new Set());
+  const viewingRefRef = React.useRef(null);
+  viewingRefRef.current = viewingRef;
   useEffect(() => {
-    if (!activeGen || activeGen.status !== 'generating') return;
-    let cancelled = false;
-    const ref = activeGen.ref;
-    const fixedTitle = activeGen.title;
-    (async () => {
-      try {
-        const result = await pollBodegon(ref);
-        if (cancelled) return;
-        setActiveGen(prev => (prev && prev.ref === ref) ? {
-          ...prev,
-          status: 'draft',
-          image: result.image,
-          image_path: result.image_path,
-        } : prev);
-        if (!overlayOpenRef.current) notifyBodegonReady(fixedTitle);
-      } catch (e) {
-        if (cancelled) return;
-        setActiveGen(prev => (prev && prev.ref === ref) ? {
-          ...prev, status: 'failed', error: e.message || String(e),
-        } : prev);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeGen?.ref, activeGen?.status]);
+    for (const gen of activeGens) {
+      if (gen.status !== 'generating') continue;
+      if (pollingRefs.current.has(gen.ref)) continue;
+      pollingRefs.current.add(gen.ref);
+      const ref = gen.ref;
+      const fixedTitle = gen.title;
+      (async () => {
+        try {
+          const result = await pollBodegon(ref);
+          updateGen(ref, {
+            status: 'draft',
+            image: result.image,
+            image_path: result.image_path,
+          });
+          // Notifica solo si no está siendo vista en este momento.
+          if (viewingRefRef.current !== ref) notifyBodegonReady(ref, fixedTitle);
+        } catch (e) {
+          updateGen(ref, { status: 'failed', error: e.message || String(e) });
+        } finally {
+          pollingRefs.current.delete(ref);
+        }
+      })();
+    }
+  }, [activeGens]);
 
   // Llamado desde SpecialOrderModal y BodegonEditOverlay → arranca la generación.
   const handleSpecialOrderConfirm = ({ items, title, description, tags }) => {
@@ -261,6 +274,9 @@ export default function App() {
       return;
     }
     const items = selected.map(sku => ({ sku, qty: qtys[sku] || 1 }));
+    // Tras lanzar, vaciamos la selección para que el usuario pueda armar el
+    // siguiente bodegón inmediatamente.
+    clearSel();
     startBodegon({
       items,
       title: `Bodegón IA #${bodegonNumber}`,
@@ -269,44 +285,47 @@ export default function App() {
     });
   };
 
-  // ---- Acciones desde el BodegonOverlay (pasa por activeGen) ----
-  const handleOverlayMinimize = () => setBodegonOpen(false);
+  // ---- Acciones desde el BodegonOverlay ----
+  // Operan SIEMPRE sobre la generación que se está viendo (viewingGen).
+  // Minimizar/X = solo cerrar la vista; la gen sigue corriendo en background.
+  const handleOverlayMinimize = () => setViewingRef(null);
   const handleOverlayRegen = () => {
-    if (!activeGen) return;
-    const items = activeGen.items;
-    const title = activeGen.title;
-    const description = activeGen.description;
-    const tags = activeGen.tags;
-    // Descartamos el actual (borra fila + imagen) y arrancamos uno nuevo con
-    // los mismos parámetros.
-    const oldRef = activeGen.ref;
-    setActiveGen(null);
+    const gen = viewingGen;
+    if (!gen) return;
+    const { items, title, description, tags } = gen;
+    const oldRef = gen.ref;
+    removeGen(oldRef);
+    setViewingRef(null);
     discardBodegon(oldRef).catch(() => {});
     setTimeout(() => startBodegon({ items, title, description, tags }), 50);
   };
   const handleOverlaySave = async () => {
-    if (!activeGen || activeGen.status !== 'draft') return;
-    const saved = await commitBodegon(activeGen.ref, {
-      nombre: activeGen.title,
-      descripcion: activeGen.description || null,
-      tags: activeGen.tags || [],
+    const gen = viewingGen;
+    if (!gen || gen.status !== 'draft') return;
+    const saved = await commitBodegon(gen.ref, {
+      nombre: gen.title,
+      descripcion: gen.description || null,
+      tags: gen.tags || [],
     });
-    setBodegonNumber(n => n + 1);
-    setBodegonOpen(false);
-    setActiveGen(null);
+    removeGen(gen.ref);
+    setViewingRef(null);
     try { const bs = await listBodegones(); setHistory(bs); } catch (e) { console.error(e); }
     return saved;
   };
   const handleOverlayDiscard = async () => {
-    if (!activeGen) return;
-    try { await discardBodegon(activeGen.ref); } catch (e) { console.warn(e); }
-    setBodegonOpen(false);
-    setActiveGen(null);
+    const gen = viewingGen;
+    if (!gen) return;
+    const ref = gen.ref;
+    removeGen(ref);
+    setViewingRef(null);
+    try { await discardBodegon(ref); } catch (e) { console.warn(e); }
   };
-  // Actualizar metadatos en activeGen (título / descripción / etiquetas).
+  // Actualizar metadatos en la gen que se está viendo.
   const handleOverlayUpdateMeta = (patch) => {
-    setActiveGen(prev => prev ? { ...prev, ...patch } : prev);
+    if (viewingRef) updateGen(viewingRef, patch);
   };
+  // Click en una card de "En curso" del historial: abre el overlay de esa gen.
+  const handleViewGen = (ref) => setViewingRef(ref);
 
   const handleDeletedBodegon = async (id) => {
     if (id && SUPABASE_READY) {
@@ -452,10 +471,12 @@ export default function App() {
         <HistoryScreen
           products={products}
           history={history}
+          activeGens={activeGens}
           onRename={handleRenameBodegon}
           onDelete={handleDeletedBodegon}
           onRefresh={refreshHistory}
           onEdit={(b) => setEditBodegon(b)}
+          onViewGen={handleViewGen}
         />
       )}
 
@@ -479,8 +500,8 @@ export default function App() {
       />
 
       <BodegonOverlay
-        open={bodegonOpen}
-        activeGen={activeGen}
+        open={!!viewingGen}
+        activeGen={viewingGen}
         products={products}
         onMinimize={handleOverlayMinimize}
         onRegen={handleOverlayRegen}
@@ -489,11 +510,17 @@ export default function App() {
         onUpdateMeta={handleOverlayUpdateMeta}
       />
 
+      {/* Píldora: muestra la última gen activa que NO se esté viendo. Si solo
+          hay una y está en el overlay, se oculta. Si hay varias en cola con
+          el overlay cerrado, muestra la más reciente. */}
       <MinimizedGenPill
-        activeGen={activeGen}
-        visible={!!activeGen && !bodegonOpen}
-        onOpen={() => setBodegonOpen(true)}
-        onCancel={handleOverlayDiscard}
+        activeGens={activeGens}
+        viewingRef={viewingRef}
+        onOpen={(ref) => setViewingRef(ref)}
+        onCancel={(ref) => {
+          removeGen(ref);
+          discardBodegon(ref).catch(() => {});
+        }}
       />
 
       <SpecialOrderModal
