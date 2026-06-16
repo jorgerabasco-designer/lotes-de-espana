@@ -119,6 +119,15 @@ violates any of them, the entire image is wrong and must be redone:
      top-to-bottom with empty white gaps between rows.
   2. EVERY BOTTLE STANDS UPRIGHT, VERTICAL, LABEL TO THE CAMERA.
      No tilting. No lying on its side. No diagonal. Ever.
+     This includes the FOREGROUND. Common "still-life" magazine
+     decoration puts one or two bottles lying down in front. DO
+     NOT DO THAT. This is a catalog product shot for an
+     e-commerce site, not a magazine still-life. The retailer
+     CANNOT use the image if even ONE bottle is lying down —
+     they will reject the bodegón and re-order it. If you are
+     about to place any bottle horizontally, instead stand it
+     up vertically next to the others, or move it slightly back
+     into the back tier. NEVER horizontally. NEVER tilted.
   3. EVERY LABEL IS IDENTICAL TO ITS REFERENCE IMAGE.
      No invention. No "similar" version. No variant substitution.
      No re-coloured, simplified or modernised version.
