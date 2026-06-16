@@ -6,6 +6,12 @@
 [functions]
   node_bundler = "esbuild"
 
+# Marcapasos: la función keep-alive corre una vez al día y hace un SELECT
+# trivial a Supabase para que no pause el proyecto por inactividad (su
+# política gratuita pausa tras 7 días sin actividad). Coste: ~0.
+[functions."keep-alive"]
+  schedule = "@daily"
+
 [[redirects]]
   from = "/api/generate-bodegon"
   to = "/.netlify/functions/generate-bodegon-background"
