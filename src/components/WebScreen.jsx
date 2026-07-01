@@ -456,55 +456,56 @@ export default function WebScreen({ showInfo }) {
         </div>
       </div>
 
-      {/* ---- 2. Etiquetas ---- */}
-      <div className="web-block">
-        <div className="web-blockh">
-          <h3>Etiquetas traseras</h3>
-          <p>Fotos PNG/JPG/WEBP/PDF nombradas por la referencia del producto (ej. <code>06AC044.png</code>). Al subir otra con la misma referencia se reescribe.</p>
+      {/* ---- 2 + 3. Etiquetas & Fotos de lotes (2 columnas) ---- */}
+      <div className="web-two-col">
+        <div className="web-block">
+          <div className="web-blockh">
+            <h3>Etiquetas traseras</h3>
+            <p>Fotos PNG/JPG/WEBP/PDF nombradas por la referencia del producto (ej. <code>06AC044.png</code>). Al subir otra con la misma referencia se reescribe.</p>
+          </div>
+          <UploadDrop
+            label="Arrastra aquí etiquetas o pulsa para seleccionar"
+            hint="Formato admitido: PNG · JPG · WEBP · PDF"
+            accept={ALLOWED_LABEL_EXTS.map(e => '.' + e).join(',')}
+            onFiles={handleEtiquetasFiles}
+            multiple
+            dragOver={dragOverEt}
+            setDragOver={setDragOverEt}
+            progress={uploadingEt}
+          />
+          <div className="web-count-row">
+            <span>{etiquetas.length} etiqueta{etiquetas.length === 1 ? '' : 's'} guardada{etiquetas.length === 1 ? '' : 's'}</span>
+            {etiquetas.length > 0 && (
+              <button className="btn btn-ghost" onClick={() => setShowEtiquetasList(true)}>
+                {I.catalog({ size: 14 })} Ver listado
+              </button>
+            )}
+          </div>
         </div>
-        <UploadDrop
-          label="Arrastra aquí etiquetas o pulsa para seleccionar"
-          hint="Formato admitido: PNG · JPG · WEBP · PDF"
-          accept={ALLOWED_LABEL_EXTS.map(e => '.' + e).join(',')}
-          onFiles={handleEtiquetasFiles}
-          multiple
-          dragOver={dragOverEt}
-          setDragOver={setDragOverEt}
-          progress={uploadingEt}
-        />
-        <div className="web-count-row">
-          <span>{etiquetas.length} etiqueta{etiquetas.length === 1 ? '' : 's'} guardada{etiquetas.length === 1 ? '' : 's'}</span>
-          {etiquetas.length > 0 && (
-            <button className="btn btn-ghost" onClick={() => setShowEtiquetasList(true)}>
-              {I.catalog({ size: 14 })} Ver listado
-            </button>
-          )}
-        </div>
-      </div>
 
-      {/* ---- 3. Fotos de lotes ---- */}
-      <div className="web-block">
-        <div className="web-blockh">
-          <h3>Fotos de lotes</h3>
-          <p>Fotos de los lotes ya montados. El número se extrae del nombre del fichero (ej. <code>lote-de-navidad-surtido-<b>216</b>.jpg</code>) y se renombra a <code>216.jpg</code>.</p>
-        </div>
-        <UploadDrop
-          label="Arrastra aquí fotos de lotes o pulsa para seleccionar"
-          hint="Formato admitido: PNG · JPG · WEBP · PDF"
-          accept={ALLOWED_LOTE_EXTS.map(e => '.' + e).join(',')}
-          onFiles={handleLotePhotosFiles}
-          multiple
-          dragOver={dragOverLo}
-          setDragOver={setDragOverLo}
-          progress={uploadingLo}
-        />
-        <div className="web-count-row">
-          <span>{lotePhotos.length} foto{lotePhotos.length === 1 ? '' : 's'} guardada{lotePhotos.length === 1 ? '' : 's'}</span>
-          {lotePhotos.length > 0 && (
-            <button className="btn btn-ghost" onClick={() => setShowLotesList(true)}>
-              {I.catalog({ size: 14 })} Ver listado
-            </button>
-          )}
+        <div className="web-block">
+          <div className="web-blockh">
+            <h3>Fotos de lotes</h3>
+            <p>Fotos de los lotes ya montados. El número se extrae del nombre del fichero (ej. <code>lote-de-navidad-surtido-<b>216</b>.jpg</code>) y se renombra a <code>216.jpg</code>.</p>
+          </div>
+          <UploadDrop
+            label="Arrastra aquí fotos de lotes o pulsa para seleccionar"
+            hint="Formato admitido: PNG · JPG · WEBP · PDF"
+            accept={ALLOWED_LOTE_EXTS.map(e => '.' + e).join(',')}
+            onFiles={handleLotePhotosFiles}
+            multiple
+            dragOver={dragOverLo}
+            setDragOver={setDragOverLo}
+            progress={uploadingLo}
+          />
+          <div className="web-count-row">
+            <span>{lotePhotos.length} foto{lotePhotos.length === 1 ? '' : 's'} guardada{lotePhotos.length === 1 ? '' : 's'}</span>
+            {lotePhotos.length > 0 && (
+              <button className="btn btn-ghost" onClick={() => setShowLotesList(true)}>
+                {I.catalog({ size: 14 })} Ver listado
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -667,6 +668,8 @@ export default function WebScreen({ showInfo }) {
         .web-warn{padding:12px 16px;background:rgba(167,77,74,.08);border:1px solid var(--accent);color:var(--accent);font-size:12.5px;border-radius:12px;font-weight:600}
 
         .web-block{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 26px;display:flex;flex-direction:column;gap:14px}
+        .web-two-col{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+        @media (max-width:1100px){ .web-two-col{grid-template-columns:1fr} }
         .web-blockh h3{font-family:'Fraunces',serif;font-weight:500;font-size:22px;color:var(--ink);letter-spacing:-.01em;margin:0 0 4px}
         .web-blockh p{margin:0;font-size:13px;color:var(--muted);line-height:1.5;max-width:820px}
         .web-blockh code{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;background:var(--bg);padding:1px 6px;border-radius:5px;color:var(--ink-2)}
