@@ -10,6 +10,7 @@ import ImportExcelModal from './components/ImportExcelModal.jsx';
 import SpecialOrderModal from './components/SpecialOrderModal.jsx';
 import BodegonEditOverlay from './components/BodegonEditOverlay.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
+import WebScreen from './components/WebScreen.jsx';
 import MinimizedGenPill from './components/MinimizedGenPill.jsx';
 import {
   listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
@@ -481,6 +482,8 @@ export default function App() {
       )}
 
       {!loading && active === 'settings' && <SettingsScreen products={products} onProductsChanged={refreshProducts}/>}
+
+      {!loading && active === 'web' && <WebScreen showInfo={showInfo}/>}
 
       <ProductEditOverlay
         open={editOpen}

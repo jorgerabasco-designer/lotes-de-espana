@@ -16,6 +16,7 @@ export default function Sidebar({
     { id: 'products', label: 'Productos',     icon: 'product' },
     { id: 'history',  label: 'Historial',     icon: 'history' },
     { id: 'settings', label: 'Configuración', icon: 'settings' },
+    { id: 'web',      label: 'Web',           icon: 'web' },
   ];
 
   const toggleTag = (id) => setTags(tags.includes(id) ? tags.filter(x => x !== id) : [...tags, id]);

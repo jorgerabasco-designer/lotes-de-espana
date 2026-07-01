@@ -135,6 +135,22 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('bodegones', 'bodegones', true)
 ON CONFLICT (id) DO NOTHING;
 
+-- Nuevos buckets para la sección "Web":
+--   · etiquetas: fotos de traseras (nombradas por REFERENCIA RP)
+--   · lotes:     fotos de lotes ya montados (nombradas por número de lote)
+--   · documents: catálogo Excel maestro y otros documentos
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('etiquetas', 'etiquetas', true)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('lotes', 'lotes', true)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('documents', 'documents', true)
+ON CONFLICT (id) DO NOTHING;
+
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS)
@@ -164,6 +180,18 @@ DROP POLICY IF EXISTS "productos_update" ON storage.objects;
 DROP POLICY IF EXISTS "productos_delete" ON storage.objects;
 DROP POLICY IF EXISTS "bodegones_read"   ON storage.objects;
 DROP POLICY IF EXISTS "bodegones_insert" ON storage.objects;
+DROP POLICY IF EXISTS "etiquetas_read"   ON storage.objects;
+DROP POLICY IF EXISTS "etiquetas_insert" ON storage.objects;
+DROP POLICY IF EXISTS "etiquetas_update" ON storage.objects;
+DROP POLICY IF EXISTS "etiquetas_delete" ON storage.objects;
+DROP POLICY IF EXISTS "lotes_read"       ON storage.objects;
+DROP POLICY IF EXISTS "lotes_insert"     ON storage.objects;
+DROP POLICY IF EXISTS "lotes_update"     ON storage.objects;
+DROP POLICY IF EXISTS "lotes_delete"     ON storage.objects;
+DROP POLICY IF EXISTS "documents_read"   ON storage.objects;
+DROP POLICY IF EXISTS "documents_insert" ON storage.objects;
+DROP POLICY IF EXISTS "documents_update" ON storage.objects;
+DROP POLICY IF EXISTS "documents_delete" ON storage.objects;
 
 CREATE POLICY "productos_read"   ON storage.objects FOR SELECT USING (bucket_id = 'productos');
 CREATE POLICY "productos_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'productos');
@@ -172,6 +200,21 @@ CREATE POLICY "productos_delete" ON storage.objects FOR DELETE USING (bucket_id 
 
 CREATE POLICY "bodegones_read"   ON storage.objects FOR SELECT USING (bucket_id = 'bodegones');
 CREATE POLICY "bodegones_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'bodegones');
+
+CREATE POLICY "etiquetas_read"   ON storage.objects FOR SELECT USING (bucket_id = 'etiquetas');
+CREATE POLICY "etiquetas_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'etiquetas');
+CREATE POLICY "etiquetas_update" ON storage.objects FOR UPDATE USING (bucket_id = 'etiquetas');
+CREATE POLICY "etiquetas_delete" ON storage.objects FOR DELETE USING (bucket_id = 'etiquetas');
+
+CREATE POLICY "lotes_read"       ON storage.objects FOR SELECT USING (bucket_id = 'lotes');
+CREATE POLICY "lotes_insert"     ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'lotes');
+CREATE POLICY "lotes_update"     ON storage.objects FOR UPDATE USING (bucket_id = 'lotes');
+CREATE POLICY "lotes_delete"     ON storage.objects FOR DELETE USING (bucket_id = 'lotes');
+
+CREATE POLICY "documents_read"   ON storage.objects FOR SELECT USING (bucket_id = 'documents');
+CREATE POLICY "documents_insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'documents');
+CREATE POLICY "documents_update" ON storage.objects FOR UPDATE USING (bucket_id = 'documents');
+CREATE POLICY "documents_delete" ON storage.objects FOR DELETE USING (bucket_id = 'documents');
 
 
 -- ============================================================================
