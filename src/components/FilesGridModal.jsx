@@ -46,27 +46,28 @@ export default function FilesGridModal({ open, onClose, title, items = [], onDel
   return (
     <div className="fgm-back" onClick={onClose}>
       <div className="fgm-modal" onClick={e => e.stopPropagation()}>
-        <button className="fgm-close" onClick={onClose} aria-label="Cerrar">{I.close({ size: 18 })}</button>
-
         <header className="fgm-head">
-          <div>
+          <div className="fgm-headinfo">
             <div className="fgm-eye">Listado</div>
             <h2 className="fgm-title">{title}</h2>
             <div className="fgm-sub">{filtered.length} de {items.length} · pulsa una para descargarla en pestaña nueva</div>
           </div>
-          <div className="fgm-search">
-            {I.search({ size: 14 })}
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={searchPlaceholder}
-              autoFocus
-            />
-            {query && (
-              <button className="fgm-clear" onClick={() => setQuery('')} aria-label="Limpiar">
-                {I.close({ size: 12 })}
-              </button>
-            )}
+          <div className="fgm-headtools">
+            <div className="fgm-search">
+              {I.search({ size: 14 })}
+              <input
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={searchPlaceholder}
+                autoFocus
+              />
+              {query && (
+                <button className="fgm-clear" onClick={() => setQuery('')} aria-label="Limpiar">
+                  {I.close({ size: 12 })}
+                </button>
+              )}
+            </div>
+            <button className="fgm-close" onClick={onClose} aria-label="Cerrar">{I.close({ size: 18 })}</button>
           </div>
         </header>
 
@@ -122,10 +123,12 @@ export default function FilesGridModal({ open, onClose, title, items = [], onDel
         <style>{`
           .fgm-back{position:fixed;inset:0;background:rgba(20,16,12,.55);backdrop-filter:blur(8px);z-index:600;display:grid;place-items:center;padding:24px;animation:fadeIn .2s}
           .fgm-modal{position:relative;background:#FAFAF7;border-radius:18px;width:min(1080px,96vw);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 90px -20px rgba(0,0,0,.4);animation:popIn .3s cubic-bezier(.2,.8,.2,1)}
-          .fgm-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.9);border:1px solid var(--line);color:var(--ink);transition:all .15s;z-index:10;cursor:pointer}
-          .fgm-close:hover{background:#fff;transform:scale(1.05);border-color:var(--ink)}
+          .fgm-close{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);color:var(--ink);transition:all .15s;cursor:pointer;flex-shrink:0}
+          .fgm-close:hover{transform:scale(1.05);border-color:var(--ink)}
 
           .fgm-head{padding:22px 28px 14px;border-bottom:1px solid var(--line);background:#fff;flex-shrink:0;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:flex-end}
+          .fgm-headinfo{flex:1;min-width:200px}
+          .fgm-headtools{display:flex;align-items:center;gap:10px;flex-shrink:0}
           .fgm-eye{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:6px}
           .fgm-title{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.012em;margin:0}
           .fgm-sub{color:var(--muted);font-size:12px;margin-top:4px}
