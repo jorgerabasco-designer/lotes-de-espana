@@ -92,6 +92,23 @@ CREATE INDEX IF NOT EXISTS idx_bodegones_numero ON bodegones(numero DESC);
 
 
 -- ============================================================================
+-- TABLA: lote_metadata (cache de títulos/descripciones scrapeados de la web)
+-- Se rellena con el botón "Sincronizar con la web" desde la pantalla Web,
+-- que hace scraping de lotesdeespana.es una vez por lote.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS lote_metadata (
+  numero TEXT PRIMARY KEY,
+  titulo TEXT,
+  descripcion TEXT,
+  imagen_url TEXT,
+  page_url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_lote_metadata_updated ON lote_metadata(updated_at DESC);
+
+
+-- ============================================================================
 -- TABLA: settings (clave/valor para configuración global)
 -- Aquí se guarda, entre otras cosas, el prompt editable de Gemini.
 -- ============================================================================
@@ -157,9 +174,10 @@ ON CONFLICT (id) DO NOTHING;
 -- Acceso completo desde el frontend (anon).
 -- IMPORTANTE: si en el futuro añades login, restringir a usuarios autenticados.
 -- ============================================================================
-ALTER TABLE products  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bodegones ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settings  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bodegones     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lote_metadata ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "products_all" ON products;
 CREATE POLICY "products_all" ON products FOR ALL USING (true) WITH CHECK (true);
@@ -169,6 +187,9 @@ CREATE POLICY "bodegones_all" ON bodegones FOR ALL USING (true) WITH CHECK (true
 
 DROP POLICY IF EXISTS "settings_all" ON settings;
 CREATE POLICY "settings_all" ON settings FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "lote_metadata_all" ON lote_metadata;
+CREATE POLICY "lote_metadata_all" ON lote_metadata FOR ALL USING (true) WITH CHECK (true);
 
 
 -- ============================================================================

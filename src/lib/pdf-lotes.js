@@ -181,9 +181,12 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
 // ---------- PDF de DESCRIPCIÓN ----------
 
 // productos: [{ ref, uds, descripcion }]
-// tituloLote: string opcional (por defecto "Lote de Navidad surtido NNN")
+// tituloLote: string opcional (por defecto "Lote de Navidad surtido NNN"). Si se
+//   sincronizó con la web, aquí llegará "Lote de Navidad Original NNN" (o el que sea).
+// descripcionLote: string opcional. Texto largo scrapeado de la ficha; si viene,
+//   se pinta entre la foto y la lista de productos.
 // loteFotoUrl: URL de la foto del lote (o null)
-export async function generateDescripcionPDF({ loteNumero, tituloLote, loteFotoUrl, productos }) {
+export async function generateDescripcionPDF({ loteNumero, tituloLote, descripcionLote, loteFotoUrl, productos }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const W = 210, H = 297;
   const marginX = 15;
@@ -222,12 +225,31 @@ export async function generateDescripcionPDF({ loteNumero, tituloLote, loteFotoU
     }
   }
 
+  // Descripción larga de la web (si vino sincronizada)
+  if (descripcionLote) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9.5);
+    doc.setTextColor(80, 75, 70);
+    const descMaxW = W - marginX * 2;
+    // Compactamos saltos de línea excesivos
+    const compact = String(descripcionLote).replace(/\n{3,}/g, '\n\n').trim();
+    const dlines = doc.splitTextToSize(compact, descMaxW);
+    for (const line of dlines) {
+      if (y > H - 20) { doc.addPage(); y = 20; }
+      doc.text(line, marginX, y);
+      y += 4.8;
+    }
+    y += 3;
+  }
+
   // Línea separadora
   doc.setDrawColor(220);
   doc.line(marginX, y, W - marginX, y);
   y += 6;
 
   // Listado de productos
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(45, 42, 38);
   doc.setFontSize(10);
   const lineH = 5.4;
   const bodyMaxY = H - 15;

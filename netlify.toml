@@ -18,6 +18,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/sync-lote-metadata"
+  to = "/.netlify/functions/sync-lote-metadata-background"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
