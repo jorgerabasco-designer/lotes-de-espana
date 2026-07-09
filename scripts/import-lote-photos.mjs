@@ -32,24 +32,24 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 }
 
 const BASE = 'https://www.lotesdeespana.es';
-// La categoría cambia de temporada. Se prueban en orden hasta encontrar hits.
-const LISTING_CANDIDATES = [
-  '/21-lotes-de-navidad-surtidos',
-  '/14-lotes-de-navidad',
-];
+// El sitemap.xml de PrestaShop lista TODAS las fichas de producto del sitio.
+// Con eso pillamos las 4 categorías (Lotes, Cestas, Baúles, Cajas, Bandejas,
+// Regalos, Selección jamones y paletas…) sin recorrer categoría por categoría.
+const SITEMAP_INDEX = '/1_index_sitemap.xml';
 const BUCKET = 'lotes';
-const CONCURRENCY = 4;
-const MAX_LISTING_PAGES = 20;
+const CONCURRENCY = 8;
 const UA = 'Mozilla/5.0 (LotesDeEspana Studio importer)';
 
 const supa = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false },
 });
 
-// Captura fichas de tipo "…-lote-de-navidad-<algo>-<numero>.html".
-// El numero de lote es el último grupo de dígitos antes de .html.
-const LOTE_URL_RE = /https?:\/\/[^"'\s<>]+?\/\d+-lote-de-navidad-[a-z0-9-]+?-\d+\.html/gi;
-const LOTE_NUM_RE = /-(\d+)\.html(?:$|[?#])/i;
+// URLs de ficha PrestaShop: /<idProducto>-<slug>.html
+const PRODUCT_URL_RE = /https:\/\/www\.lotesdeespana\.es\/\d+-[a-z0-9-]+\.html/gi;
+// Sacamos el "número de lote" del final del slug (última secuencia de dígitos
+// antes de .html, tolerando un guion suelto tipo "-203-.html" que aparece en
+// alguna ficha por error).
+const LOTE_NUM_RE = /-(\d+)-?\.html$/i;
 
 async function fetchText(url) {
   const res = await fetch(url, { headers: { 'User-Agent': UA } });
@@ -95,53 +95,63 @@ function contentTypeFor(ext) {
   return 'image/jpeg';
 }
 
-async function enumerateOnCategory(catPath) {
-  const all = new Set();
-  for (let page = 1; page <= MAX_LISTING_PAGES; page++) {
-    const url = `${BASE}${catPath}?p=${page}`;
-    let html;
-    try { html = await fetchText(url); }
-    catch (e) { console.log(`    ${url}: ${e.message} — corto.`); break; }
-    const urls = extractLoteUrls(html);
-    const fresh = urls.filter(u => !all.has(u));
-    console.log(`    p=${page}: ${urls.length} enlaces (${fresh.length} nuevos)`);
-    if (fresh.length === 0) break;
-    fresh.forEach(u => all.add(u));
-  }
-  return all;
+function extractProductUrlsFromSitemap(xml) {
+  const set = new Set();
+  for (const m of xml.matchAll(PRODUCT_URL_RE)) set.add(m[0]);
+  return [...set];
 }
 
+// Descubre TODAS las fichas del sitio a través del sitemap.
 async function enumerateLotes() {
-  const merged = new Set();
-  for (const cat of LISTING_CANDIDATES) {
-    console.log(`  Categoría ${cat}:`);
-    const found = await enumerateOnCategory(cat);
-    found.forEach(u => merged.add(u));
+  console.log(`  Descargando índice: ${SITEMAP_INDEX}`);
+  const indexXml = await fetchText(BASE + SITEMAP_INDEX);
+  const subs = [...indexXml.matchAll(/<loc>\s*([^<\s]+\.xml)\s*<\/loc>/gi)].map(m => m[1]);
+  console.log(`  Sub-sitemaps: ${subs.length}`);
+  const all = new Set();
+  for (const sub of subs) {
+    console.log(`  · ${sub.replace(BASE, '')}`);
+    let xml;
+    try { xml = await fetchText(sub); }
+    catch (e) { console.log(`    (fallo: ${e.message})`); continue; }
+    const urls = extractProductUrlsFromSitemap(xml);
+    urls.forEach(u => all.add(u));
+    console.log(`    → ${urls.length} fichas nuevas`);
   }
-  return [...merged];
+  return [...all];
+}
+
+// De la URL saca el "identificador" con el que se guardará la foto.
+// - Si acaba en "-<NNN>.html" (o "-<NNN>-.html") → NNN (número de lote).
+// - Si no (jamones sueltos), usa el slug entero (después del ID de PrestaShop).
+function identifierFromUrl(url) {
+  const path = url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.html$/, '');
+  const numMatch = path.match(/-(\d+)-?$/);
+  if (numMatch) return { id: numMatch[1], kind: 'numero' };
+  // Quitar el ID de PrestaShop del principio para dejar el slug legible.
+  const slug = path.replace(/^\d+-/, '').replace(/-+$/, '');
+  return { id: slug, kind: 'slug' };
 }
 
 async function processLote(loteUrl) {
-  const numero = extractLoteNumero(loteUrl);
-  if (!numero) return { status: 'skip', reason: 'sin nº en URL', url: loteUrl };
+  const { id, kind } = identifierFromUrl(loteUrl);
   try {
     const html = await fetchText(loteUrl);
     let photo = extractPhotoUrl(html);
-    if (!photo) return { numero, status: 'skip', reason: 'sin foto en la ficha' };
+    if (!photo) return { id, kind, status: 'skip', reason: 'sin foto en la ficha', url: loteUrl };
     if (photo.startsWith('//')) photo = 'https:' + photo;
     else if (photo.startsWith('/')) photo = BASE + photo;
 
     const ext = extOf(photo);
     const buf = await fetchBuffer(photo);
-    const path = `${numero}.${ext}`;
+    const path = `${id}.${ext}`;
     const { error } = await supa.storage.from(BUCKET).upload(path, buf, {
       upsert: true,
       contentType: contentTypeFor(ext),
     });
-    if (error) return { numero, status: 'error', reason: error.message };
-    return { numero, status: 'ok', path, bytes: buf.length };
+    if (error) return { id, kind, status: 'error', reason: error.message };
+    return { id, kind, status: 'ok', path, bytes: buf.length };
   } catch (e) {
-    return { numero, status: 'error', reason: e.message };
+    return { id, kind, status: 'error', reason: e.message };
   }
 }
 
@@ -153,9 +163,9 @@ async function runPool(items, worker, concurrency) {
       const i = idx++;
       const r = await worker(items[i]);
       out[i] = r;
-      if (r.status === 'ok') console.log(`  ✓ ${r.numero} (${(r.bytes/1024).toFixed(0)} KB → ${r.path})`);
-      else if (r.status === 'skip') console.log(`  ○ ${r.numero || '?'} skip: ${r.reason}`);
-      else console.log(`  ✗ ${r.numero || '?'} ${r.reason}`);
+      if (r.status === 'ok') console.log(`  ✓ ${r.id} (${(r.bytes/1024).toFixed(0)} KB → ${r.path})`);
+      else if (r.status === 'skip') console.log(`  ○ ${r.id || '?'} skip: ${r.reason}`);
+      else console.log(`  ✗ ${r.id || '?'} ${r.reason}`);
     }
   });
   await Promise.all(runners);
@@ -177,12 +187,14 @@ const ok    = results.filter(r => r.status === 'ok');
 const skip  = results.filter(r => r.status === 'skip');
 const error = results.filter(r => r.status === 'error');
 
+const byNumero = ok.filter(r => r.kind === 'numero');
+const bySlug   = ok.filter(r => r.kind === 'slug');
 console.log('\n──────── RESUMEN ────────');
-console.log(`   ✓ ${ok.length} subidas`);
+console.log(`   ✓ ${ok.length} subidas (${byNumero.length} por nº de lote · ${bySlug.length} jamones/paletas por nombre)`);
 console.log(`   ○ ${skip.length} descartadas (sin foto)`);
 console.log(`   ✗ ${error.length} errores`);
 if (error.length) {
   console.log('\nErrores detallados:');
-  for (const e of error) console.log(`   · ${e.numero || '?'} — ${e.reason}`);
+  for (const e of error) console.log(`   · ${e.id || '?'} — ${e.reason}`);
 }
-console.log(`\nBucket destino: ${BUCKET}. Nombres: <numero>.<ext>, con upsert (sobrescriben).`);
+console.log(`\nBucket destino: ${BUCKET}. Con upsert:true (sobrescriben las anteriores).`);
