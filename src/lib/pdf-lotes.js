@@ -8,8 +8,7 @@
 //       - Si la etiqueta subida es PDF, se renderiza a canvas con pdf.js.
 //
 //   · PDF de DESCRIPCIÓN de un lote:
-//       - Cabecera con logo y "Lote de Navidad surtido NNN" (o el título
-//         que le pases por parámetro cuando sincronices con la web).
+//       - Cabecera con logo y "Lote de Navidad surtido NNN".
 //       - Foto del lote (~40% de la altura útil).
 //       - Debajo, lista con "N UDS.  DESCRIPCIÓN" resaltando la marca.
 
@@ -181,12 +180,8 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
 // ---------- PDF de DESCRIPCIÓN ----------
 
 // productos: [{ ref, uds, descripcion }]
-// tituloLote: string opcional (por defecto "Lote de Navidad surtido NNN"). Si se
-//   sincronizó con la web, aquí llegará "Lote de Navidad Original NNN" (o el que sea).
-// descripcionLote: string opcional. Texto largo scrapeado de la ficha; si viene,
-//   se pinta entre la foto y la lista de productos.
 // loteFotoUrl: URL de la foto del lote (o null)
-export async function generateDescripcionPDF({ loteNumero, tituloLote, descripcionLote, loteFotoUrl, productos }) {
+export async function generateDescripcionPDF({ loteNumero, loteFotoUrl, productos }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const W = 210, H = 297;
   const marginX = 15;
@@ -196,11 +191,10 @@ export async function generateDescripcionPDF({ loteNumero, tituloLote, descripci
   if (logo) {
     try { doc.addImage(logo, 'PNG', marginX, 10, 14, 14); } catch {}
   }
-  const titulo = tituloLote || `Lote de Navidad surtido ${loteNumero}`;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(45, 42, 38);
-  doc.text(titulo, marginX + 18, 18);
+  doc.text(`Lote de Navidad surtido ${loteNumero}`, marginX + 18, 18);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(120, 115, 105);
@@ -223,23 +217,6 @@ export async function generateDescripcionPDF({ loteNumero, tituloLote, descripci
         y += drawH + 6;
       } catch {}
     }
-  }
-
-  // Descripción larga de la web (si vino sincronizada)
-  if (descripcionLote) {
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(9.5);
-    doc.setTextColor(80, 75, 70);
-    const descMaxW = W - marginX * 2;
-    // Compactamos saltos de línea excesivos
-    const compact = String(descripcionLote).replace(/\n{3,}/g, '\n\n').trim();
-    const dlines = doc.splitTextToSize(compact, descMaxW);
-    for (const line of dlines) {
-      if (y > H - 20) { doc.addPage(); y = 20; }
-      doc.text(line, marginX, y);
-      y += 4.8;
-    }
-    y += 3;
   }
 
   // Línea separadora

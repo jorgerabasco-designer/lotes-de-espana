@@ -9,7 +9,6 @@ import {
   listEtiquetas, listLotePhotos, deleteEtiqueta, deleteLotePhoto,
   getMasterExcelInfo, fetchMasterExcelBuffer,
   getEtiquetaUrlByRef, getLotePhotoUrl,
-  listLoteMetadata, getLoteMetadata, getSyncStatus, triggerScrape,
   ALLOWED_LABEL_EXTS, ALLOWED_LOTE_EXTS, ALLOWED_EXCEL_EXTS,
 } from '../lib/web-files.js';
 import { generateEtiquetasPDF, generateDescripcionPDF } from '../lib/pdf-lotes.js';
@@ -101,11 +100,6 @@ export default function WebScreen({ showInfo }) {
   const [showEtiquetasList, setShowEtiquetasList] = useState(false);
   const [showLotesList, setShowLotesList] = useState(false);
 
-  // ---- Metadata de web (títulos + descripciones) ----
-  const [loteMetadata, setLoteMetadata] = useState([]);
-  const [syncStatus, setSyncStatus] = useState(null); // { status, done, total, upserted, errors, message, ... }
-  const [syncing, setSyncing] = useState(false);
-
   // ---- Carga inicial ----
   useEffect(() => {
     (async () => {
@@ -122,40 +116,8 @@ export default function WebScreen({ showInfo }) {
         setEtiquetas(await listEtiquetas());
         setLotePhotos(await listLotePhotos());
       } catch (e) { console.warn(e); }
-      try {
-        setLoteMetadata(await listLoteMetadata());
-        setSyncStatus(await getSyncStatus());
-      } catch (e) { console.warn(e); }
     })();
   }, []);
-
-  // Polling del estado de sincronización mientras está corriendo.
-  useEffect(() => {
-    if (syncStatus?.status !== 'running') return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const st = await getSyncStatus();
-        if (cancelled) return;
-        setSyncStatus(st);
-        if (st?.status === 'done' || st?.status === 'failed') {
-          setSyncing(false);
-          // Refrescar los metadatos completos al terminar
-          try { setLoteMetadata(await listLoteMetadata()); } catch {}
-          return;
-        }
-      } catch (e) { console.warn(e); }
-      if (!cancelled) setTimeout(tick, 2500);
-    };
-    const t = setTimeout(tick, 2000);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [syncStatus?.status]);
-
-  const loteMetadataMap = useMemo(() => {
-    const m = new Map();
-    for (const row of loteMetadata) m.set(String(row.numero), row);
-    return m;
-  }, [loteMetadata]);
 
   const excelSheetsSet = useMemo(() => new Set(excelWorkbook?.SheetNames || []), [excelWorkbook]);
 
@@ -306,11 +268,8 @@ export default function WebScreen({ showInfo }) {
           blob = await generateEtiquetasPDF({ loteNumero: num, productos: withUrls });
         } else {
           const fotoUrl = await getLotePhotoUrl(num);
-          const meta = loteMetadataMap.get(String(num));
           blob = await generateDescripcionPDF({
             loteNumero: num,
-            tituloLote: meta?.titulo || `Lote de Navidad surtido ${num}`,
-            descripcionLote: meta?.descripcion || null,
             loteFotoUrl: fotoUrl,
             productos,
           });
@@ -365,25 +324,6 @@ export default function WebScreen({ showInfo }) {
   const clearPdfs = () => {
     pdfs.forEach(p => { if (p.url) try { URL.revokeObjectURL(p.url); } catch {} });
     setPdfs([]);
-  };
-
-  // ---- Sincronizar con la web ----
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      await triggerScrape();
-      // Ponemos un estado optimista para que el polling arranque; la función
-      // real actualizará settings.lote_metadata_sync inmediatamente.
-      setSyncStatus({ status: 'running', message: 'Iniciando…', total: 0, done: 0 });
-    } catch (e) {
-      setSyncing(false);
-      showInfo?.({
-        icon: 'trash', tone: 'danger',
-        title: 'No se pudo iniciar la sincronización',
-        description: e.message,
-        confirmLabel: 'Cerrar', confirmTone: 'neutral',
-      });
-    }
   };
 
   // ---- Borrado desde el listado modal ----
@@ -506,44 +446,6 @@ export default function WebScreen({ showInfo }) {
               </button>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* ---- 3.5 Sincronización con la web ---- */}
-      <div className="web-block">
-        <div className="web-blockh">
-          <h3>Títulos y descripciones desde lotesdeespana.es</h3>
-          <p>Al pulsar el botón, el sistema descarga los títulos y descripciones actuales de cada lote desde la web y los usa en los PDFs de descripción. Tarda 2-4 min. Puedes seguir usando la app mientras tanto.</p>
-        </div>
-        <div className="sync-row">
-          <div className="sync-info">
-            <div className="sync-eye">Estado</div>
-            <div className="sync-stat">
-              {syncStatus?.status === 'running'
-                ? <>Sincronizando · {syncStatus.done || 0} de {syncStatus.total || '…'}</>
-                : loteMetadata.length > 0
-                  ? <>{loteMetadata.length} lotes con metadatos guardados</>
-                  : 'Nunca sincronizado'}
-            </div>
-            {syncStatus?.finished_at && syncStatus?.status !== 'running' && (
-              <div className="sync-meta">
-                Última sincronización: {formatDate(syncStatus.finished_at)}
-                {syncStatus.errors > 0 && ` · ${syncStatus.errors} errores`}
-              </div>
-            )}
-            {syncStatus?.message && syncStatus?.status === 'running' && (
-              <div className="sync-meta">{syncStatus.message}</div>
-            )}
-          </div>
-          <button
-            className="btn btn-primary"
-            onClick={handleSync}
-            disabled={syncing || syncStatus?.status === 'running'}
-          >
-            {(syncing || syncStatus?.status === 'running')
-              ? <><span className="mini-spin"/>Sincronizando…</>
-              : <>{I.refresh({ size: 14 })} Sincronizar con la web</>}
-          </button>
         </div>
       </div>
 
@@ -687,14 +589,6 @@ export default function WebScreen({ showInfo }) {
         .web-count{font-size:12px;color:var(--muted);text-align:right}
         .web-count-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
         .web-count-row .btn{padding:7px 12px;font-size:12px}
-
-        .sync-row{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;padding:14px 16px;background:var(--bg);border:1px solid var(--line);border-radius:12px}
-        .sync-info{flex:1;min-width:220px}
-        .sync-eye{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:4px}
-        .sync-stat{font-size:14px;font-weight:600;color:var(--ink)}
-        .sync-meta{font-size:11.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
-        .mini-spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite;margin-right:2px}
-        @keyframes spin{to{transform:rotate(360deg)}}
 
         .lote-input-row{display:flex;gap:10px}
         .lote-input{flex:1;font-family:inherit;font-size:14px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;outline:none;transition:all .15s}
