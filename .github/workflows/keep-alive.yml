@@ -1,0 +1,31 @@
+name: Keep Supabase Alive
+
+# Mantiene la base de datos de Supabase (plan gratuito) despierta.
+# Hace una consulta de lectura mínima a la tabla "products" para reiniciar
+# el contador de inactividad de 7 días.
+
+on:
+  schedule:
+    # Todos los días a las 07:00 UTC (09:00 hora peninsular en verano, 08:00 en invierno)
+    - cron: '0 7 * * *'
+  workflow_dispatch:   # Permite lanzarlo a mano desde la pestaña "Actions"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar la base de datos para reiniciar el contador de inactividad
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${SUPABASE_URL}/rest/v1/products?select=ref&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+          echo "Codigo de respuesta HTTP: $response"
+          if [ "$response" -ne 200 ]; then
+            echo "El ping ha fallado (esperaba 200, recibido $response)"
+            exit 1
+          fi
+          echo "Ping correcto. Supabase sigue activa."
