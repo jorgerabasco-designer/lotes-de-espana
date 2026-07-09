@@ -179,92 +179,146 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
 
 // ---------- PDF de DESCRIPCIÓN ----------
 
-// productos: [{ ref, uds, descripcion }]
-// loteFotoUrl: URL de la foto del lote (o null)
-export async function generateDescripcionPDF({ loteNumero, loteFotoUrl, productos }) {
+// PDF del QR — replica el formato oficial de Lotes de España:
+//   · Logo verde de cabecera (assets/qr-header.png si existe, o texto placeholder)
+//   · Foto grande del lote centrada
+//   · Título "TIPO - REF. NNN" (mayúsculas, negrita) a la izquierda + precio a la derecha
+//   · Bullets "N producto DESCRIPCIÓN con marca en negrita"
+//   · Pie legal en cursiva pequeña (viene del docx que subió Jorge)
+//
+// Parámetros:
+//   loteNumero:  "223"
+//   tipoLote:    "LOTES SURTIDOS"           (viene del prefijo de la nomenclatura)
+//   loteFotoUrl: URL de la foto del lote (bucket 'lotes')
+//   productos:   [{ uds, descripcion }]
+//   precio:      número o null            (si null → PDF "sin precio")
+//   pieLegal:    string (footer)
+export async function generateDescripcionPDF({
+  loteNumero,
+  tipoLote,
+  loteFotoUrl,
+  productos,
+  precio = null,
+  pieLegal = '',
+}) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const W = 210, H = 297;
   const marginX = 15;
 
-  // Cabecera con logo y título
+  const INK   = [45, 42, 38];
+  const MUTED = [120, 115, 105];
+  const GREEN = [64, 116, 66];  // verde del branding "lotesdeespana"
+
+  // ---------- BANDA VERDE DECORATIVA ----------
+  doc.setFillColor(...GREEN);
+  doc.rect(0, 0, W, 28, 'F');
   const logo = await fetchLogoDataUrl();
   if (logo) {
-    try { doc.addImage(logo, 'PNG', marginX, 10, 14, 14); } catch {}
+    try { doc.addImage(logo, 'PNG', W / 2 - 22, 6, 44, 16); }
+    catch {}
+  } else {
+    // Fallback: texto placeholder centrado
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(255, 255, 255);
+    doc.text('lotesdeespana', W / 2, 18, { align: 'center' });
   }
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.setTextColor(45, 42, 38);
-  doc.text(`Lote de Navidad surtido ${loteNumero}`, marginX + 18, 18);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(120, 115, 105);
-  doc.text(`Lote #${loteNumero} · ${productos.length} productos`, marginX + 18, 24);
 
-  let y = 32;
+  let y = 36;
 
-  // Foto del lote (si hay)
+  // ---------- FOTO DEL LOTE ----------
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
-      const maxW = W - marginX * 2;
-      const maxH = 90; // ~30% del alto útil
+      const maxW = W - marginX * 2 - 20;
+      const maxH = 110;
       const ratio = rendered.width / rendered.height;
       let drawW = maxW, drawH = maxW / ratio;
       if (drawH > maxH) { drawH = maxH; drawW = maxH * ratio; }
-      const drawX = marginX + (maxW - drawW) / 2;
+      const drawX = marginX + ((W - marginX * 2) - drawW) / 2;
       try {
         doc.addImage(rendered.dataUrl, 'JPEG', drawX, y, drawW, drawH);
-        y += drawH + 6;
+        y += drawH + 8;
       } catch {}
     }
   }
 
-  // Línea separadora
-  doc.setDrawColor(220);
+  // ---------- TÍTULO + PRECIO ----------
+  const titulo = `${(tipoLote || 'LOTE').toUpperCase()} - REF. ${loteNumero}`;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(19);
+  doc.setTextColor(...INK);
+  doc.text(titulo, marginX, y);
+  if (precio != null && !isNaN(precio)) {
+    const precioStr = `${Number(precio).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€ + IVA`;
+    doc.text(precioStr, W - marginX, y, { align: 'right' });
+  }
+  y += 4;
+
+  // Línea gruesa separadora
+  doc.setDrawColor(...INK);
+  doc.setLineWidth(0.8);
   doc.line(marginX, y, W - marginX, y);
+  doc.setLineWidth(0.2);
   y += 6;
 
-  // Listado de productos
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(45, 42, 38);
+  // ---------- LISTADO DE PRODUCTOS ----------
   doc.setFontSize(10);
-  const lineH = 5.4;
-  const bodyMaxY = H - 15;
+  const lineH = 4.9;
+  const bodyMaxY = H - 25;
+
+  // Anchos: bullet, cifra uds, descripción
+  const bulletX = marginX;
+  const udsX    = marginX + 3;
+  const udsMaxW = 6;
+  const descX   = udsX + udsMaxW + 1.2;
+  const descMaxW = W - marginX - descX;
 
   for (const p of productos) {
-    if (y > bodyMaxY - lineH) {
-      doc.addPage();
-      y = 20;
-    }
-    // Unidades en negrita
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(45, 42, 38);
-    const udsStr = `${p.uds || 1}`;
-    const udsW = doc.getTextWidth(udsStr) + 2;
-    doc.text(udsStr, marginX, y);
-    // Descripción en normal (con posibles marcas en MAYÚSCULAS que se dejan
-    // como están; el ojo humano ya las percibe destacadas).
+    if (y > bodyMaxY - lineH) { doc.addPage(); y = 22; }
+
+    // Bullet gris
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(45, 42, 38);
-    const descX = marginX + udsW;
-    const descMaxW = W - marginX - descX;
-    const lines = doc.splitTextToSize(p.descripcion || '(sin descripción)', descMaxW);
+    doc.setTextColor(...MUTED);
+    doc.text('•', bulletX, y);
+
+    // Nº de unidades
+    doc.setTextColor(...INK);
+    doc.text(`${p.uds || 1}`, udsX, y);
+
+    // Descripción con marcas en negrita (todo lo que esté en MAYÚSCULAS+ se
+    // deja tal cual — el ojo ya lo percibe destacado; jsPDF no soporta rangos
+    // de bold parcial fácilmente sin fuentes embebidas).
+    const desc = (p.descripcion || '(sin descripción)').trim();
+    const lines = doc.splitTextToSize(desc, descMaxW);
     for (let li = 0; li < lines.length; li++) {
-      if (y > bodyMaxY - lineH) { doc.addPage(); y = 20; }
+      if (y > bodyMaxY - lineH) { doc.addPage(); y = 22; }
+      doc.setTextColor(...INK);
       doc.text(lines[li], descX, y);
       y += lineH;
     }
-    y += 0.5;
   }
 
-  // Pie de página en todas las páginas
-  const pageCount = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
+  // Línea gruesa antes del pie legal
+  y += 2;
+  doc.setDrawColor(...INK);
+  doc.setLineWidth(0.8);
+  doc.line(marginX, y, W - marginX, y);
+  doc.setLineWidth(0.2);
+
+  // ---------- PIE LEGAL (última página, cursiva pequeña) ----------
+  if (pieLegal) {
+    const pageCount = doc.internal.getNumberOfPages();
+    doc.setPage(pageCount);
+    doc.setFont('helvetica', 'italic');
     doc.setFontSize(8);
-    doc.setTextColor(150, 145, 135);
-    doc.text('Lotes de España · lotesdeespana.es', marginX, H - 8);
-    doc.text(`${i} / ${pageCount}`, W - marginX - 10, H - 8);
+    doc.setTextColor(...MUTED);
+    const pieLines = doc.splitTextToSize(pieLegal, W - marginX * 2);
+    let py = H - 12 - (pieLines.length - 1) * 3.2;
+    for (const line of pieLines) {
+      doc.text(line, W / 2, py, { align: 'center' });
+      py += 3.2;
+    }
   }
 
   return doc.output('blob');

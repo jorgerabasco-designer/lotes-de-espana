@@ -15,10 +15,19 @@ import { supabase, SUPABASE_READY, publicUrl } from './supabase.js';
 const BUCKET_ETIQUETAS = 'etiquetas';
 const BUCKET_LOTES     = 'lotes';
 const BUCKET_DOCS      = 'documents';
-const MASTER_EXCEL_NAME = 'master-catalog.xlsx';
+const MASTER_EXCEL_NAME       = 'master-catalog.xlsx';
+const TARIFAS_EXCEL_NAME      = 'tarifa-nacional.xlsx';
+const NOMENCLATURA_EXCEL_NAME = 'nomenclatura-qr.xlsx';
 
 // Formato válido de referencia (RP): 2 dígitos + 2 letras + 3 dígitos.
-const REF_RE = /^([0-9]{2}[A-Z]{2}[0-9]{3})$/;
+// El RP debe estar AL INICIO del nombre. Después puede venir cualquier texto
+// (descripción del producto), separado por espacio, guion, guion bajo o punto.
+// Ejemplos válidos:
+//   "06AC044.png"
+//   "01CV002 CERVEZA ALEMANA SCHWABEN BRÄU DAS HELLE PILS.png"
+//   "03BL003 V BL HACIENDA LOPEZ DE HARO A 2025.png"
+// Ejemplos NO válidos: "0106AC044-x.png" (no empieza por 2 dígitos + 2 letras + 3 dígitos)
+const REF_RE = /^([0-9]{2}[A-Z]{2}[0-9]{3})(?:[\s\-_.]|$)/;
 
 // ---------- helpers de nombres ----------
 
@@ -215,4 +224,53 @@ export async function fetchMasterExcelBuffer() {
   if (!res.ok) throw new Error(`No se pudo descargar el Excel (${res.status}).`);
   return res.arrayBuffer();
 }
+
+// ---------- EXCEL TARIFAS + NOMENCLATURA ----------
+// Ambos son ficheros con nombre fijo en el bucket 'documents' que se sobrescriben
+// cuando se sube uno nuevo. Se parsean en cliente con la librería xlsx.
+
+async function uploadFixedNameExcel(file, fixedName) {
+  if (!SUPABASE_READY) return { ok: false, error: 'Supabase no está conectado.' };
+  const ext = extOf(file.name);
+  if (!ALLOWED_EXCEL_EXTS.includes(ext)) {
+    return { ok: false, error: `Formato no soportado (.${ext}). Usa XLSX o XLS.` };
+  }
+  const { error } = await supabase.storage
+    .from(BUCKET_DOCS)
+    .upload(fixedName, file, { upsert: true, contentType: file.type || undefined });
+  if (error) return { ok: false, error: error.message || 'Error subiendo el Excel.' };
+  return { ok: true, path: fixedName, url: publicUrl(BUCKET_DOCS, fixedName), originalName: file.name };
+}
+
+async function getFixedNameExcelInfo(fixedName, searchHint) {
+  if (!SUPABASE_READY) return null;
+  const { data, error } = await supabase.storage
+    .from(BUCKET_DOCS)
+    .list('', { limit: 50, search: searchHint });
+  if (error || !data || !data.length) return null;
+  const hit = data.find(o => o.name === fixedName);
+  if (!hit) return null;
+  return {
+    path: hit.name,
+    url: publicUrl(BUCKET_DOCS, hit.name),
+    size: hit.metadata?.size || 0,
+    updatedAt: hit.updated_at || hit.created_at || null,
+  };
+}
+
+async function fetchFixedNameExcelBuffer(fixedName, searchHint, notFoundError) {
+  const info = await getFixedNameExcelInfo(fixedName, searchHint);
+  if (!info) throw new Error(notFoundError);
+  const res = await fetch(info.url);
+  if (!res.ok) throw new Error(`No se pudo descargar el Excel (${res.status}).`);
+  return res.arrayBuffer();
+}
+
+export function uploadTarifasExcel(file)      { return uploadFixedNameExcel(file, TARIFAS_EXCEL_NAME); }
+export function getTarifasExcelInfo()         { return getFixedNameExcelInfo(TARIFAS_EXCEL_NAME, 'tarifa-nacional'); }
+export function fetchTarifasExcelBuffer()     { return fetchFixedNameExcelBuffer(TARIFAS_EXCEL_NAME, 'tarifa-nacional', 'No hay Excel de tarifas subido todavía.'); }
+
+export function uploadNomenclaturaExcel(file) { return uploadFixedNameExcel(file, NOMENCLATURA_EXCEL_NAME); }
+export function getNomenclaturaExcelInfo()    { return getFixedNameExcelInfo(NOMENCLATURA_EXCEL_NAME, 'nomenclatura-qr'); }
+export function fetchNomenclaturaExcelBuffer(){ return fetchFixedNameExcelBuffer(NOMENCLATURA_EXCEL_NAME, 'nomenclatura-qr', 'No hay Excel de nomenclatura subido todavía.'); }
 
