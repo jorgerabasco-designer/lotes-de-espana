@@ -77,8 +77,10 @@ function readLoteSheet(workbook, loteNum) {
 // Pie de página que va al final de los PDFs de QR (viene del docx que Jorge nos pasó).
 const PIE_LEGAL = 'En caso de que se produzca rotura de stock de algún componente de nuestras referencias, nuestra empresa se reserva el derecho de sustituir cualquier producto por otro de igual o superior valor sin coste adicional. Se atienden reclamaciones hasta el 10 de enero.';
 
-// De la fila de tarifas saca el precio con IVA (redondeado a 2 decimales).
-// Formato Excel: Ref | Pag | Nombre | B.Imp | Iva  → precio = B.Imp + Iva.
+// De la fila de tarifas saca el precio SIN IVA (base imponible).
+// Formato Excel: Ref | Pag | Nombre | B.Imp | Iva  → precio = B.Imp.
+// El IVA no se suma: en el PDF se muestra "{precio}€ + IVA" indicando que
+// el importe final lo incluirá aparte.
 function readTarifas(workbook) {
   if (!workbook) return new Map();
   const m = new Map();
@@ -87,10 +89,8 @@ function readTarifas(workbook) {
     for (const r of rows) {
       const ref = r[0];
       const base = Number(r[3]);
-      const iva  = Number(r[4]);
       if (ref == null || !isFinite(base)) continue;
-      const total = base + (isFinite(iva) ? iva : 0);
-      m.set(String(ref).trim(), Math.round(total * 100) / 100);
+      m.set(String(ref).trim(), Math.round(base * 100) / 100);
     }
   }
   return m;
