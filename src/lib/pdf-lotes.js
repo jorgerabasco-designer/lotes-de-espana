@@ -20,6 +20,36 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // ---------- helpers ----------
 
+// Calidad JPEG para las imágenes embebidas en el PDF. 0.85 es imperceptible
+// respecto a 0.95 en fotos, pero reduce el peso del stream ~40 %. Sube este
+// número si algún día se ven artefactos en la foto del lote o en las etiquetas.
+const JPEG_QUALITY = 0.85;
+
+// Máximo de píxeles a lo largo del lado más grande de una imagen embebida.
+// Un PDF impreso a 300 DPI a página completa A4 son ~2480 px de ancho; por
+// encima de ese tamaño el detalle extra no se ve y solo hincha el PDF.
+const MAX_LONG_SIDE = 2200;
+
+// Toma un canvas y devuelve un {canvas, dataUrl, width, height} con la imagen
+// redimensionada si supera MAX_LONG_SIDE. Preserva el aspect ratio.
+function encodeCanvas(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const longSide = Math.max(w, h);
+  if (longSide > MAX_LONG_SIDE) {
+    const scale = MAX_LONG_SIDE / longSide;
+    const dw = Math.round(w * scale);
+    const dh = Math.round(h * scale);
+    const out = document.createElement('canvas');
+    out.width = dw; out.height = dh;
+    const ctx = out.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, 0, 0, dw, dh);
+    return { dataUrl: out.toDataURL('image/jpeg', JPEG_QUALITY), width: dw, height: dh };
+  }
+  return { dataUrl: canvas.toDataURL('image/jpeg', JPEG_QUALITY), width: w, height: h };
+}
+
 // Descarga una imagen/PDF de una URL, devuelve un objeto con:
 //   { type: 'image'|'pdf'|null, dataUrl, width, height }
 // Para PDF renderiza la primera página a un canvas.
@@ -40,12 +70,8 @@ async function fetchAsRenderable(url) {
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    return {
-      type: 'pdf',
-      dataUrl: canvas.toDataURL('image/jpeg', 0.92),
-      width: canvas.width,
-      height: canvas.height,
-    };
+    const enc = encodeCanvas(canvas);
+    return { type: 'pdf', dataUrl: enc.dataUrl, width: enc.width, height: enc.height };
   }
   // Imagen normal → carga en un Image para saber dimensiones
   return await new Promise((resolve) => {
@@ -56,9 +82,9 @@ async function fetchAsRenderable(url) {
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       canvas.getContext('2d').drawImage(img, 0, 0);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+      const enc = encodeCanvas(canvas);
       URL.revokeObjectURL(objectUrl);
-      resolve({ type: 'image', dataUrl, width: img.naturalWidth, height: img.naturalHeight });
+      resolve({ type: 'image', dataUrl: enc.dataUrl, width: enc.width, height: enc.height });
     };
     img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(null); };
     img.src = objectUrl;
@@ -106,26 +132,25 @@ async function fetchHeaderBandRenderable() {
 // Cada celda tiene un titulillo con el nombre corto del producto (extraído de
 // la descripción, no el RP).
 export async function generateEtiquetasPDF({ loteNumero, productos }) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
   const W = 210, H = 297;
   const marginX = 12;
 
-  // Cabecera con logo proporcionado y título del lote.
+  // Cabecera: título grande "Lote NNN" con el logo proporcionado a la izquierda.
   const logo = await fetchLogoRenderable();
-  const logoTargetH = 12;
-  let logoW = 12;
+  const logoTargetH = 14;
+  let logoW = 14;
   if (logo?.dataUrl) {
-    // Usar aspect ratio real del logo para no estirarlo.
     const ratio = (logo.width || 1) / (logo.height || 1);
     logoW = logoTargetH * ratio;
     try { doc.addImage(logo.dataUrl, 'JPEG', marginX, 8, logoW, logoTargetH); }
-    catch { logoW = 12; }
+    catch { logoW = 14; }
   }
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
+  doc.setFontSize(22);
   doc.setTextColor(45, 42, 38);
-  const titleX = marginX + logoW + 4;
-  doc.text(`Etiquetas · Lote ${loteNumero}`, titleX, 16);
+  const titleX = marginX + logoW + 6;
+  doc.text(`Lote ${loteNumero}`, titleX, 20);
 
   // ---- Rejilla 2 × 2 (4 etiquetas por página) ----
   const cols = 2, rows = 2;
@@ -238,7 +263,7 @@ export async function generateDescripcionPDF({
   precio = null,
   pieLegal = '',
 }) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
   const W = 210, H = 297;
   const marginX = 15;
 
