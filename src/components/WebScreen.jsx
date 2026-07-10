@@ -454,7 +454,7 @@ export default function WebScreen({ showInfo }) {
       <header className="cat-head">
         <div>
           <h1 className="cat-title">PDFs Web</h1>
-          <p className="cat-sub">Sube etiquetas y fotos de lotes, y genera PDFs a partir del catálogo Excel maestro.</p>
+          <p className="cat-sub">Genera los PDFs de las fichas de lote — etiquetas traseras y QR con o sin precio — a partir del Excel del catálogo.</p>
         </div>
       </header>
 
