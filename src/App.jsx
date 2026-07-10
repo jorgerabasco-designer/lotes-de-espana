@@ -21,6 +21,25 @@ import {
 import { SUPABASE_READY } from './lib/supabase.js';
 import { useTaxonomy } from './lib/taxonomy.jsx';
 
+// Mapa vista ↔ path para que cada tab tenga URL propia y se puedan compartir.
+// El fallback SPA de Netlify (netlify.toml) ya redirige cualquier ruta a
+// index.html, así que estos paths funcionan en producción tal cual.
+const VIEW_PATHS = {
+  catalog:  '/catalogo',
+  products: '/productos',
+  history:  '/historial',
+  settings: '/configuracion',
+  web:      '/pdfs-web',
+};
+function pathFromView(view) {
+  return VIEW_PATHS[view] || '/';
+}
+function viewFromPath(path) {
+  const p = String(path || '').replace(/\/+$/, '') || '/';
+  const hit = Object.entries(VIEW_PATHS).find(([, v]) => v === p);
+  return hit ? hit[0] : 'catalog';
+}
+
 export default function App() {
   const taxonomy = useTaxonomy();
   const [products, setProducts] = useState([]);
@@ -28,7 +47,23 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   const [selected, setSelected] = useState([]);
-  const [active, setActive] = useState('catalog');
+  const [active, setActiveRaw] = useState(() => viewFromPath(window.location.pathname));
+
+  // Cambia la vista activa y refleja el cambio en la URL (history.pushState).
+  const setActive = React.useCallback((view) => {
+    setActiveRaw(view);
+    const targetPath = pathFromView(view);
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ view }, '', targetPath);
+    }
+  }, []);
+
+  // Al navegar con el back/forward del navegador, sincronizamos el state.
+  useEffect(() => {
+    const onPop = () => setActiveRaw(viewFromPath(window.location.pathname));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // Filters
   const [query, setQuery] = useState('');
