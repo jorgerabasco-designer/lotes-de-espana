@@ -527,50 +527,7 @@ export default function WebScreen({ showInfo }) {
         )}
       </div>
 
-      {/* ---- 2. Tres Excels en la misma fila ---- */}
-      <div className="web-three-col">
-        <ExcelBlock
-          title="Excel del catálogo"
-          subtitle="Textos y productos por lote. Al subir uno nuevo, se sustituye al anterior."
-          info={excel}
-          extraMeta={excelWorkbook && ` · ${excelWorkbook.SheetNames.length} hojas (lotes)`}
-          emptyMeta="Sube el Excel para poder generar PDFs."
-          uploading={uploadingExcel}
-          dragOver={dragOverExcel}
-          setDragOver={setDragOverExcel}
-          onFile={(f) => handleExcelUpload(f, 'catalogo')}
-          filenameLabel="master-catalog.xlsx"
-          compact
-        />
-        <ExcelBlock
-          title="Tarifas nacionales"
-          subtitle="Precio (base + IVA) por referencia. Se usa en el QR con precio."
-          info={tarifas}
-          extraMeta={tarifasMap.size > 0 && ` · ${tarifasMap.size} referencias`}
-          emptyMeta="Sin tarifas → los PDFs QR se generan sin precio."
-          uploading={uploadingTarifas}
-          dragOver={dragOverTarifas}
-          setDragOver={setDragOverTarifas}
-          onFile={(f) => handleExcelUpload(f, 'tarifas')}
-          filenameLabel="tarifa-nacional.xlsx"
-          compact
-        />
-        <ExcelBlock
-          title="Nomenclatura QR"
-          subtitle="Nombre exacto de cada PDF (ej. 'Lotes Surtidos 223.pdf')."
-          info={nomencl}
-          extraMeta={nomenclaturaMap.size > 0 && ` · ${nomenclaturaMap.size} referencias`}
-          emptyMeta="Sin nomenclatura → los PDFs se llamarán 'Lote NNN.pdf'."
-          uploading={uploadingNomencl}
-          dragOver={dragOverNomencl}
-          setDragOver={setDragOverNomencl}
-          onFile={(f) => handleExcelUpload(f, 'nomenclatura')}
-          filenameLabel="nomenclatura-qr.xlsx"
-          compact
-        />
-      </div>
-
-      {/* ---- 2 + 3. Etiquetas & Fotos de lotes (2 columnas) ---- */}
+      {/* ---- 2. Etiquetas & Fotos de lotes (2 columnas) ---- */}
       <div className="web-two-col">
         <div className="web-block">
           <div className="web-blockh">
@@ -621,6 +578,49 @@ export default function WebScreen({ showInfo }) {
             )}
           </div>
         </div>
+      </div>
+
+      {/* ---- 3. Tres Excels en la misma fila (abajo) ---- */}
+      <div className="web-three-col">
+        <ExcelBlock
+          title="Excel del catálogo"
+          subtitle="Textos y productos por lote. Al subir uno nuevo, se sustituye al anterior."
+          info={excel}
+          extraMeta={excelWorkbook && ` · ${excelWorkbook.SheetNames.length} hojas (lotes)`}
+          emptyMeta="Sube el Excel para poder generar PDFs."
+          uploading={uploadingExcel}
+          dragOver={dragOverExcel}
+          setDragOver={setDragOverExcel}
+          onFile={(f) => handleExcelUpload(f, 'catalogo')}
+          filenameLabel="master-catalog.xlsx"
+          compact
+        />
+        <ExcelBlock
+          title="Tarifas nacionales"
+          subtitle="Precio (base + IVA) por referencia. Se usa en el QR con precio."
+          info={tarifas}
+          extraMeta={tarifasMap.size > 0 && ` · ${tarifasMap.size} referencias`}
+          emptyMeta="Sin tarifas → los PDFs QR se generan sin precio."
+          uploading={uploadingTarifas}
+          dragOver={dragOverTarifas}
+          setDragOver={setDragOverTarifas}
+          onFile={(f) => handleExcelUpload(f, 'tarifas')}
+          filenameLabel="tarifa-nacional.xlsx"
+          compact
+        />
+        <ExcelBlock
+          title="Nomenclatura QR"
+          subtitle="Nombre exacto de cada PDF (ej. 'Lotes Surtidos 223.pdf')."
+          info={nomencl}
+          extraMeta={nomenclaturaMap.size > 0 && ` · ${nomenclaturaMap.size} referencias`}
+          emptyMeta="Sin nomenclatura → los PDFs se llamarán 'Lote NNN.pdf'."
+          uploading={uploadingNomencl}
+          dragOver={dragOverNomencl}
+          setDragOver={setDragOverNomencl}
+          onFile={(f) => handleExcelUpload(f, 'nomenclatura')}
+          filenameLabel="nomenclatura-qr.xlsx"
+          compact
+        />
       </div>
 
       {/* Modales de listado */}
