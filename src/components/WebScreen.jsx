@@ -158,7 +158,8 @@ export default function WebScreen({ showInfo }) {
   const [loteInput, setLoteInput] = useState('');
   const [generating, setGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState({ current: 0, total: 0 });
-  const [lastZip, setLastZip] = useState(null);       // { url, filename, size, count }
+  const [lastZip, setLastZip] = useState(null);       // { url, filename, size, count, missingByLote }
+  const [showMissing, setShowMissing] = useState(false);
 
   // ---- Listado ampliado (modales) ----
   const [showEtiquetasList, setShowEtiquetasList] = useState(false);
@@ -363,6 +364,7 @@ export default function WebScreen({ showInfo }) {
     const carpetaConPrecio = zip.folder('QR CON PRECIO');
     const carpetaSinPrecio = zip.folder('QR SIN PRECIO');
     const errores = [];
+    const missingByLote = {}; // { num: [{ ref, uds, descripcion }] }
 
     for (let i = 0; i < validos.length; i++) {
       const num = validos[i];
@@ -379,8 +381,11 @@ export default function WebScreen({ showInfo }) {
           ...p,
           url: p.ref ? await getEtiquetaUrlByRef(p.ref) : null,
         })));
-        const etiquetasBlob = await generateEtiquetasPDF({ loteNumero: num, productos: withUrls });
-        zip.file(`${nombreBase} - Etiquetas.pdf`, etiquetasBlob);
+        const etiquetasResult = await generateEtiquetasPDF({ loteNumero: num, productos: withUrls });
+        zip.file(`${nombreBase} - Etiquetas.pdf`, etiquetasResult.blob);
+        if (etiquetasResult.missing?.length) {
+          missingByLote[num] = etiquetasResult.missing;
+        }
 
         const conPrecioBlob = await generateDescripcionPDF({
           loteNumero: num, tipoLote, loteFotoUrl: fotoUrl, productos, precio,
@@ -405,7 +410,7 @@ export default function WebScreen({ showInfo }) {
     const filename = validos.length === 1
       ? `Lote ${validos[0]}.zip`
       : `Lotes ${validos.length} (${new Date().toISOString().slice(0,10)}).zip`;
-    setLastZip({ url, filename, size: content.size, count: validos.length, errores });
+    setLastZip({ url, filename, size: content.size, count: validos.length, errores, missingByLote });
     setGenerating(false);
     setGenProgress({ current: 0, total: 0 });
 
@@ -459,47 +464,111 @@ export default function WebScreen({ showInfo }) {
         </div>
       )}
 
-      {/* ---- 1. Excel del catálogo ---- */}
-      <ExcelBlock
-        title="Excel del catálogo"
-        subtitle="Documento con los textos y el listado de productos por lote. Al subir uno nuevo, se sustituye al anterior."
-        info={excel}
-        extraMeta={excelWorkbook && ` · ${excelWorkbook.SheetNames.length} hojas (lotes)`}
-        emptyMeta="Sube el Excel para poder generar PDFs."
-        uploading={uploadingExcel}
-        dragOver={dragOverExcel}
-        setDragOver={setDragOverExcel}
-        onFile={(f) => handleExcelUpload(f, 'catalogo')}
-        filenameLabel="master-catalog.xlsx"
-      />
+      {/* ---- 1. Generar PDFs (arriba del todo) ---- */}
+      <div className="web-block">
+        <div className="web-blockh">
+          <h3>Generar PDFs</h3>
+          <p>Introduce el número (o varios) de lote. Se descarga un ZIP con 3 PDFs por lote: etiquetas traseras, QR con precio y QR sin precio. Puedes usar comas, espacios y rangos.</p>
+        </div>
+        <div className="lote-input-row">
+          <input
+            className="lote-input"
+            type="text"
+            placeholder="Ej: 104   ·   104, 105   ·   200-205, 300"
+            value={loteInput}
+            onChange={(e) => setLoteInput(e.target.value)}
+            disabled={generating}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={doGenerate}
+            disabled={!excelWorkbook || generating || !loteInput.trim()}
+          >
+            {I.download({ size: 14 })}
+            {generating
+              ? `Generando ${genProgress.current + 1}/${genProgress.total}…`
+              : 'Generar'}
+          </button>
+        </div>
 
-      {/* ---- 1b. Tarifas nacionales ---- */}
-      <ExcelBlock
-        title="Tarifas nacionales"
-        subtitle="Excel con el precio (base + IVA) de cada referencia. Sirve para poner el precio en los PDFs con QR. Al subir uno nuevo, se sustituye al anterior."
-        info={tarifas}
-        extraMeta={tarifasMap.size > 0 && ` · ${tarifasMap.size} referencias con precio`}
-        emptyMeta="Sin tarifas → los PDFs se generan igual, pero sin el precio."
-        uploading={uploadingTarifas}
-        dragOver={dragOverTarifas}
-        setDragOver={setDragOverTarifas}
-        onFile={(f) => handleExcelUpload(f, 'tarifas')}
-        filenameLabel="tarifa-nacional.xlsx"
-      />
+        {lastZip && (
+          <div className="zip-out">
+            <div className="zip-info">
+              <div className="zip-name">
+                {I.download({ size: 16 })}
+                <span>{lastZip.filename}</span>
+              </div>
+              <div className="zip-meta">
+                {lastZip.count} lote{lastZip.count === 1 ? '' : 's'} · {formatBytes(lastZip.size)} · {lastZip.count * 3} PDFs (etiquetas + QR con precio + QR sin precio)
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={downloadZip}>
+              {I.download({ size: 14 })} Descargar ZIP
+            </button>
+          </div>
+        )}
 
-      {/* ---- 1c. Nomenclatura QR ---- */}
-      <ExcelBlock
-        title="Nomenclatura de los PDFs QR"
-        subtitle="Excel con el nombre exacto que debe tener cada PDF (ej. 'Lotes Surtidos 223.pdf'). Se usa tanto en 'QR CON PRECIO' como en 'QR SIN PRECIO'."
-        info={nomencl}
-        extraMeta={nomenclaturaMap.size > 0 && ` · ${nomenclaturaMap.size} referencias con nombre`}
-        emptyMeta="Sin nomenclatura → los PDFs se llamarán 'Lote NNN.pdf' por defecto."
-        uploading={uploadingNomencl}
-        dragOver={dragOverNomencl}
-        setDragOver={setDragOverNomencl}
-        onFile={(f) => handleExcelUpload(f, 'nomenclatura')}
-        filenameLabel="nomenclatura-qr.xlsx"
-      />
+        {lastZip && Object.keys(lastZip.missingByLote || {}).length > 0 && (
+          <button
+            className="missing-banner"
+            onClick={() => setShowMissing(true)}
+            title="Ver referencias sin etiqueta"
+          >
+            <span className="missing-dot"/>
+            {(() => {
+              const totalRefs = new Set();
+              for (const list of Object.values(lastZip.missingByLote)) {
+                for (const m of list) totalRefs.add(m.ref || m.descripcion);
+              }
+              const nLotes = Object.keys(lastZip.missingByLote).length;
+              return <>Faltan {totalRefs.size} etiqueta{totalRefs.size === 1 ? '' : 's'} en {nLotes} lote{nLotes === 1 ? '' : 's'}. Toca para ver el detalle.</>;
+            })()}
+          </button>
+        )}
+      </div>
+
+      {/* ---- 2. Tres Excels en la misma fila ---- */}
+      <div className="web-three-col">
+        <ExcelBlock
+          title="Excel del catálogo"
+          subtitle="Textos y productos por lote. Al subir uno nuevo, se sustituye al anterior."
+          info={excel}
+          extraMeta={excelWorkbook && ` · ${excelWorkbook.SheetNames.length} hojas (lotes)`}
+          emptyMeta="Sube el Excel para poder generar PDFs."
+          uploading={uploadingExcel}
+          dragOver={dragOverExcel}
+          setDragOver={setDragOverExcel}
+          onFile={(f) => handleExcelUpload(f, 'catalogo')}
+          filenameLabel="master-catalog.xlsx"
+          compact
+        />
+        <ExcelBlock
+          title="Tarifas nacionales"
+          subtitle="Precio (base + IVA) por referencia. Se usa en el QR con precio."
+          info={tarifas}
+          extraMeta={tarifasMap.size > 0 && ` · ${tarifasMap.size} referencias`}
+          emptyMeta="Sin tarifas → los PDFs QR se generan sin precio."
+          uploading={uploadingTarifas}
+          dragOver={dragOverTarifas}
+          setDragOver={setDragOverTarifas}
+          onFile={(f) => handleExcelUpload(f, 'tarifas')}
+          filenameLabel="tarifa-nacional.xlsx"
+          compact
+        />
+        <ExcelBlock
+          title="Nomenclatura QR"
+          subtitle="Nombre exacto de cada PDF (ej. 'Lotes Surtidos 223.pdf')."
+          info={nomencl}
+          extraMeta={nomenclaturaMap.size > 0 && ` · ${nomenclaturaMap.size} referencias`}
+          emptyMeta="Sin nomenclatura → los PDFs se llamarán 'Lote NNN.pdf'."
+          uploading={uploadingNomencl}
+          dragOver={dragOverNomencl}
+          setDragOver={setDragOverNomencl}
+          onFile={(f) => handleExcelUpload(f, 'nomenclatura')}
+          filenameLabel="nomenclatura-qr.xlsx"
+          compact
+        />
+      </div>
 
       {/* ---- 2 + 3. Etiquetas & Fotos de lotes (2 columnas) ---- */}
       <div className="web-two-col">
@@ -554,85 +623,49 @@ export default function WebScreen({ showInfo }) {
         </div>
       </div>
 
-      {/* ---- 4. Generar PDFs ---- */}
-      <div className="web-block">
-        <div className="web-blockh">
-          <h3>Generar PDFs</h3>
-          <p>Introduce el número (o varios) de lote. Se descarga un ZIP con 3 PDFs por lote: etiquetas traseras, QR con precio y QR sin precio. Puedes usar comas, espacios y rangos.</p>
-        </div>
-        <div className="lote-input-row">
-          <input
-            className="lote-input"
-            type="text"
-            placeholder="Ej: 104   ·   104, 105   ·   200-205, 300"
-            value={loteInput}
-            onChange={(e) => setLoteInput(e.target.value)}
-            disabled={generating}
-          />
-          <button
-            className="btn btn-primary"
-            onClick={doGenerate}
-            disabled={!excelWorkbook || generating || !loteInput.trim()}
-          >
-            {I.download({ size: 14 })}
-            {generating
-              ? `Generando ${genProgress.current + 1}/${genProgress.total}…`
-              : 'Generar'}
-          </button>
-        </div>
+      {/* Modales de listado */}
+      <FilesGridModal
+        open={showEtiquetasList}
+        onClose={() => setShowEtiquetasList(false)}
+        title="Etiquetas guardadas"
+        items={etiquetas.map(e => ({
+          id: e.path,
+          label: e.ref,
+          url: e.url,
+          size: e.size,
+          updatedAt: e.updatedAt,
+          path: e.path,
+          isPdf: /\.pdf$/i.test(e.path),
+        }))}
+        onDelete={handleDeleteEtiqueta}
+        searchPlaceholder="Buscar por referencia…"
+        emptyText="Aún no has subido ninguna etiqueta."
+      />
+      <FilesGridModal
+        open={showLotesList}
+        onClose={() => setShowLotesList(false)}
+        title="Fotos de lotes guardadas"
+        items={lotePhotos.map(p => ({
+          id: p.path,
+          label: `Lote ${p.numero}`,
+          url: p.url,
+          size: p.size,
+          updatedAt: p.updatedAt,
+          path: p.path,
+          isPdf: /\.pdf$/i.test(p.path),
+        }))}
+        onDelete={handleDeleteLotePhoto}
+        searchPlaceholder="Buscar por nº de lote…"
+        emptyText="Aún no has subido ninguna foto de lote."
+      />
 
-        <FilesGridModal
-          open={showEtiquetasList}
-          onClose={() => setShowEtiquetasList(false)}
-          title="Etiquetas guardadas"
-          items={etiquetas.map(e => ({
-            id: e.path,
-            label: e.ref,
-            url: e.url,
-            size: e.size,
-            updatedAt: e.updatedAt,
-            path: e.path,
-            isPdf: /\.pdf$/i.test(e.path),
-          }))}
-          onDelete={handleDeleteEtiqueta}
-          searchPlaceholder="Buscar por referencia…"
-          emptyText="Aún no has subido ninguna etiqueta."
+      {/* Modal de referencias sin etiqueta */}
+      {showMissing && lastZip?.missingByLote && (
+        <MissingRefsModal
+          missingByLote={lastZip.missingByLote}
+          onClose={() => setShowMissing(false)}
         />
-        <FilesGridModal
-          open={showLotesList}
-          onClose={() => setShowLotesList(false)}
-          title="Fotos de lotes guardadas"
-          items={lotePhotos.map(p => ({
-            id: p.path,
-            label: `Lote ${p.numero}`,
-            url: p.url,
-            size: p.size,
-            updatedAt: p.updatedAt,
-            path: p.path,
-            isPdf: /\.pdf$/i.test(p.path),
-          }))}
-          onDelete={handleDeleteLotePhoto}
-          searchPlaceholder="Buscar por nº de lote…"
-          emptyText="Aún no has subido ninguna foto de lote."
-        />
-
-        {lastZip && (
-          <div className="zip-out">
-            <div className="zip-info">
-              <div className="zip-name">
-                {I.download({ size: 16 })}
-                <span>{lastZip.filename}</span>
-              </div>
-              <div className="zip-meta">
-                {lastZip.count} lote{lastZip.count === 1 ? '' : 's'} · {formatBytes(lastZip.size)} · {lastZip.count * 3} PDFs (etiquetas + QR con precio + QR sin precio)
-              </div>
-            </div>
-            <button className="btn btn-primary" onClick={downloadZip}>
-              {I.download({ size: 14 })} Descargar ZIP
-            </button>
-          </div>
-        )}
-      </div>
+      )}
 
       <style>{`
         .screen{flex:1;min-width:0;padding:38px 56px 56px 64px;display:flex;flex-direction:column;gap:22px;overflow-y:auto;height:100vh;width:100%}
@@ -643,8 +676,17 @@ export default function WebScreen({ showInfo }) {
         .web-warn{padding:12px 16px;background:rgba(167,77,74,.08);border:1px solid var(--accent);color:var(--accent);font-size:12.5px;border-radius:12px;font-weight:600}
 
         .web-block{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 26px;display:flex;flex-direction:column;gap:14px}
+        .web-block-compact{padding:18px 20px;gap:10px}
         .web-two-col{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+        .web-three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:stretch}
+        .web-three-col > .web-block{height:100%}
+        @media (max-width:1180px){ .web-three-col{grid-template-columns:1fr 1fr} }
+        @media (max-width:820px){ .web-three-col{grid-template-columns:1fr} .web-two-col{grid-template-columns:1fr} }
         @media (max-width:1100px){ .web-two-col{grid-template-columns:1fr} }
+        .web-block-compact .web-blockh h3{font-size:18px}
+        .web-block-compact .web-blockh p{font-size:12px;line-height:1.45}
+        .excel-info-compact{display:flex;flex-direction:column;gap:10px}
+        .excel-info-compact .excel-drop{align-self:flex-start}
         .web-blockh h3{font-family:'Fraunces',serif;font-weight:500;font-size:22px;color:var(--ink);letter-spacing:-.01em;margin:0 0 4px}
         .web-blockh p{margin:0;font-size:13px;color:var(--muted);line-height:1.5;max-width:820px}
         .web-blockh code{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:12px;background:var(--bg);padding:1px 6px;border-radius:5px;color:var(--ink-2)}
@@ -674,6 +716,10 @@ export default function WebScreen({ showInfo }) {
         .zip-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .zip-meta{font-size:12px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
 
+        .missing-banner{margin-top:4px;padding:12px 16px;background:rgba(217,145,64,.08);border:1px solid rgba(217,145,64,.4);border-radius:12px;font-size:13px;font-weight:600;color:#8a5a1c;display:flex;align-items:center;gap:10px;cursor:pointer;transition:all .15s;font-family:inherit;text-align:left;width:100%}
+        .missing-banner:hover{background:rgba(217,145,64,.14);border-color:rgba(217,145,64,.6)}
+        .missing-dot{width:8px;height:8px;border-radius:50%;background:#d99140;flex-shrink:0;box-shadow:0 0 0 3px rgba(217,145,64,.25)}
+
         .btn{display:inline-flex;align-items:center;gap:7px;padding:11px 16px;border-radius:10px;font-size:13px;font-weight:600;letter-spacing:-.005em;transition:all .15s;border:1px solid transparent;cursor:pointer;font-family:inherit;white-space:nowrap}
         .btn:disabled{opacity:.5;cursor:not-allowed}
         .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(167,77,74,.3),0 4px 14px -4px rgba(167,77,74,.4)}
@@ -696,14 +742,14 @@ export default function WebScreen({ showInfo }) {
 }
 
 // --------- Bloque genérico de subida de Excel (catálogo / tarifas / nomenclatura) ---------
-function ExcelBlock({ title, subtitle, info, extraMeta, emptyMeta, uploading, dragOver, setDragOver, onFile, filenameLabel }) {
+function ExcelBlock({ title, subtitle, info, extraMeta, emptyMeta, uploading, dragOver, setDragOver, onFile, filenameLabel, compact }) {
   return (
-    <div className="web-block">
+    <div className={`web-block ${compact ? 'web-block-compact' : ''}`}>
       <div className="web-blockh">
         <h3>{title}</h3>
         <p>{subtitle}</p>
       </div>
-      <div className="excel-row">
+      <div className={compact ? 'excel-info-compact' : 'excel-row'}>
         <div className="excel-info">
           {info ? (
             <>
@@ -712,7 +758,7 @@ function ExcelBlock({ title, subtitle, info, extraMeta, emptyMeta, uploading, dr
                 <span>{filenameLabel}</span>
               </div>
               <div className="excel-meta">
-                Actualizado {formatDate(info.updatedAt)} · {formatBytes(info.size)}
+                {formatDate(info.updatedAt)} · {formatBytes(info.size)}
                 {extraMeta || ''}
               </div>
             </>
@@ -720,7 +766,7 @@ function ExcelBlock({ title, subtitle, info, extraMeta, emptyMeta, uploading, dr
             <>
               <div className="excel-name empty">
                 {I.excel({ size: 18 })}
-                <span>Sin Excel subido todavía</span>
+                <span>Sin Excel subido</span>
               </div>
               <div className="excel-meta">{emptyMeta}</div>
             </>
@@ -733,9 +779,76 @@ function ExcelBlock({ title, subtitle, info, extraMeta, emptyMeta, uploading, dr
           onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
         >
           {I.upload({ size: 14 })}
-          {uploading ? 'Subiendo…' : (info ? 'Sustituir Excel' : 'Subir Excel')}
+          {uploading ? 'Subiendo…' : (info ? 'Sustituir' : 'Subir Excel')}
           <input type="file" accept=".xlsx,.xlsm,.xls" onChange={(e) => onFile(e.target.files?.[0])} hidden />
         </label>
+      </div>
+    </div>
+  );
+}
+
+// --------- Modal de referencias sin etiqueta subida ---------
+function MissingRefsModal({ missingByLote, onClose }) {
+  // Aplanar y quitar duplicados por (ref, descripcion) para tener el catálogo
+  // único de faltantes; y aparte agrupamos por lote para saber dónde salen.
+  const byRef = new Map();
+  for (const [lote, list] of Object.entries(missingByLote)) {
+    for (const it of list) {
+      const k = it.ref || it.descripcion || '';
+      const prev = byRef.get(k) || { ...it, lotes: new Set() };
+      prev.lotes.add(lote);
+      byRef.set(k, prev);
+    }
+  }
+  const rows = [...byRef.values()].map(v => ({ ...v, lotes: [...v.lotes] }));
+  rows.sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+
+  return (
+    <div className="miss-back" onClick={onClose}>
+      <div className="miss-modal" onClick={e => e.stopPropagation()}>
+        <button className="miss-close" onClick={onClose} aria-label="Cerrar">{I.close({ size: 18 })}</button>
+        <header className="miss-head">
+          <div className="miss-eye">Referencias sin etiqueta</div>
+          <h2 className="miss-title">{rows.length} etiqueta{rows.length === 1 ? '' : 's'} por subir</h2>
+          <p className="miss-sub">Estas referencias aparecen en el Excel del catálogo pero no tienes su foto de trasera subida. Sube el fichero <code>&lt;RP&gt;.png</code> desde el bloque "Etiquetas traseras" y vuelve a generar el ZIP.</p>
+        </header>
+        <div className="miss-body">
+          <table className="miss-table">
+            <thead>
+              <tr>
+                <th>Ref (RP)</th>
+                <th>Descripción</th>
+                <th>Aparece en lote(s)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={(r.ref || '') + (r.descripcion || '')}>
+                  <td><strong>{r.ref || '—'}</strong></td>
+                  <td className="miss-desc">{r.descripcion || '(sin descripción)'}</td>
+                  <td className="miss-lotes">{r.lotes.join(', ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <style>{`
+          .miss-back{position:fixed;inset:0;background:rgba(20,16,12,.55);backdrop-filter:blur(8px);z-index:600;display:grid;place-items:center;padding:24px}
+          .miss-modal{position:relative;background:#FAFAF7;border-radius:18px;width:min(900px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 40px 90px -20px rgba(0,0,0,.4)}
+          .miss-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:#fff;border:1px solid var(--line);color:var(--ink);cursor:pointer;z-index:2}
+          .miss-close:hover{transform:scale(1.05);border-color:var(--ink)}
+          .miss-head{padding:22px 28px 14px;border-bottom:1px solid var(--line);background:#fff;flex-shrink:0}
+          .miss-eye{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:6px}
+          .miss-title{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.012em;margin:0}
+          .miss-sub{color:var(--muted);font-size:12.5px;line-height:1.55;margin:6px 0 0;max-width:640px}
+          .miss-sub code{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:5px;color:var(--ink-2)}
+          .miss-body{overflow:auto;flex:1;padding:8px 20px 20px}
+          .miss-table{width:100%;border-collapse:collapse;font-size:13px}
+          .miss-table thead th{position:sticky;top:0;background:var(--bg);color:var(--muted);font-weight:600;text-align:left;padding:10px 12px;font-size:11.5px;letter-spacing:.02em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+          .miss-table tbody td{padding:9px 12px;border-bottom:1px solid var(--line-2);color:var(--ink);vertical-align:top}
+          .miss-desc{color:var(--ink-2);font-size:12.5px;max-width:400px}
+          .miss-lotes{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12.5px}
+        `}</style>
       </div>
     </div>
   );

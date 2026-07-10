@@ -65,52 +65,86 @@ async function fetchAsRenderable(url) {
   });
 }
 
-async function fetchLogoDataUrl() {
+// Devuelve el logo como { dataUrl, width, height } para poder respetar su
+// aspect ratio al pintarlo. null si no se puede cargar.
+async function fetchLogoRenderable() {
   try {
     const r = await fetchAsRenderable('/logo.png');
-    return r?.dataUrl || null;
+    return r || null;
   } catch { return null; }
+}
+// Compat: algunos callers viejos usaban solo el data-url.
+async function fetchLogoDataUrl() {
+  const r = await fetchLogoRenderable();
+  return r?.dataUrl || null;
+}
+
+// Banda decorativa que va como header full-width en el PDF de descripción.
+// Se sirve desde /public/pdf-header.png. Cacheamos el data-url tras la 1ª carga.
+let _headerCache = null;
+async function fetchHeaderBandRenderable() {
+  if (_headerCache !== null) return _headerCache || null;
+  try {
+    const r = await fetchAsRenderable('/pdf-header.png');
+    _headerCache = r || false;
+    return r;
+  } catch {
+    _headerCache = false;
+    return null;
+  }
 }
 
 // ---------- PDF de ETIQUETAS TRASERAS ----------
-
-// productos: [{ ref, uds, url }] · url es la de la etiqueta guardada (o null)
-// Devuelve un Blob del PDF.
+//
+// productos: [{ ref, uds, url, descripcion }]
+// Devuelve { blob, missing } donde `missing` es la lista de {ref, uds, descripcion}
+// de los productos que no tienen etiqueta subida.
+// Los productos sin etiqueta NO se meten en el PDF — el UI los muestra aparte.
+//
+// Layout: rejilla 2×2 → 4 etiquetas por página, para que se vean grandes y se
+// puedan leer. Logo con proporción real (aspect ratio original preservado).
+// Cada celda tiene un titulillo con el nombre corto del producto (extraído de
+// la descripción, no el RP).
 export async function generateEtiquetasPDF({ loteNumero, productos }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const W = 210, H = 297;
   const marginX = 12;
-  const headerH = 22;
 
-  // Cabecera
-  const logo = await fetchLogoDataUrl();
-  if (logo) {
-    try { doc.addImage(logo, 'PNG', marginX, 8, 12, 12); } catch {}
+  // Cabecera con logo proporcionado y título del lote.
+  const logo = await fetchLogoRenderable();
+  const logoTargetH = 12;
+  let logoW = 12;
+  if (logo?.dataUrl) {
+    // Usar aspect ratio real del logo para no estirarlo.
+    const ratio = (logo.width || 1) / (logo.height || 1);
+    logoW = logoTargetH * ratio;
+    try { doc.addImage(logo.dataUrl, 'JPEG', marginX, 8, logoW, logoTargetH); }
+    catch { logoW = 12; }
   }
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
   doc.setTextColor(45, 42, 38);
-  doc.text(`Lote #${loteNumero} · Etiquetas traseras`, marginX + 16, 15);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(120, 115, 105);
-  doc.text(`${productos.length} productos · ${new Date().toLocaleDateString('es-ES')}`, marginX + 16, 20);
+  const titleX = marginX + logoW + 4;
+  doc.text(`Etiquetas · Lote ${loteNumero}`, titleX, 16);
 
-  // Rejilla 2 × 3
-  const cols = 2, rows = 3;
-  const gapX = 6, gapY = 8;
-  const gridTop = headerH + 6;
-  const gridH = H - gridTop - 12;
+  // ---- Rejilla 2 × 2 (4 etiquetas por página) ----
+  const cols = 2, rows = 2;
+  const gapX = 8, gapY = 12;
+  const gridTop = 30;
+  const gridH = H - gridTop - 14;
   const cellW = (W - marginX * 2 - gapX * (cols - 1)) / cols;
   const cellH = (gridH - gapY * (rows - 1)) / rows;
+  // Alto del titulillo de cada celda
+  const cellTitleH = 6;
+  const imgAreaH = cellH - cellTitleH;
 
-  const withUrl = productos.filter(p => p.url);
-  const missing = productos.filter(p => !p.url);
+  const withUrl  = productos.filter(p => p.url);
+  const missing  = productos
+    .filter(p => !p.url)
+    .map(p => ({ ref: p.ref, uds: p.uds, descripcion: p.descripcion }));
 
   for (let i = 0; i < withUrl.length; i++) {
-    if (i > 0 && i % (cols * rows) === 0) {
-      doc.addPage();
-    }
+    if (i > 0 && i % (cols * rows) === 0) doc.addPage();
     const idxInPage = i % (cols * rows);
     const col = idxInPage % cols;
     const row = Math.floor(idxInPage / cols);
@@ -118,24 +152,25 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
     const cellY = gridTop + row * (cellH + gapY);
 
     const p = withUrl[i];
-    // Cabecera de celda (RP + uds)
+    // Titulillo: nombre corto del producto (nombre + marca), NO el RP.
+    const label = shortProductLabel(p.descripcion);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
+    doc.setFontSize(10.5);
     doc.setTextColor(45, 42, 38);
-    doc.text(p.ref, cellX, cellY - 1);
+    const lines = doc.splitTextToSize(label, cellW - 12);
+    // Máximo 1 línea para que quede compacto.
+    doc.text(lines[0] || `Ref. ${p.ref}`, cellX, cellY + 4);
     if (p.uds && p.uds !== 1) {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(120, 115, 105);
-      doc.text(`×${p.uds}`, cellX + 22, cellY - 1);
+      doc.text(`×${p.uds}`, cellX + cellW, cellY + 4, { align: 'right' });
     }
 
-    // Área de la imagen (ligeramente por debajo del pie de cabecera)
-    const imgAreaY = cellY + 2;
-    const imgAreaH = cellH - 4;
+    // Imagen: ocupa (casi) toda la celda por debajo del titulillo.
+    const imgAreaY = cellY + cellTitleH;
     const rendered = await fetchAsRenderable(p.url);
     if (rendered) {
-      // Ajustar al área conservando aspect ratio (contain)
       const ratio = rendered.width / rendered.height;
       let drawW = cellW, drawH = cellW / ratio;
       if (drawH > imgAreaH) { drawH = imgAreaH; drawW = imgAreaH * ratio; }
@@ -143,8 +178,7 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
       const drawY = imgAreaY + (imgAreaH - drawH) / 2;
       try {
         doc.addImage(rendered.dataUrl, 'JPEG', drawX, drawY, drawW, drawH);
-      } catch (e) {
-        // Fallback: caja gris
+      } catch {
         doc.setDrawColor(230); doc.setFillColor(245);
         doc.rect(cellX, imgAreaY, cellW, imgAreaH, 'FD');
         doc.setFontSize(8); doc.setTextColor(150);
@@ -153,28 +187,31 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
     }
   }
 
-  // Página final con productos sin etiqueta subida (avisando al usuario)
-  if (missing.length) {
-    doc.addPage();
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(167, 77, 74);
-    doc.text('Productos sin etiqueta subida', marginX, 20);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(80, 75, 70);
-    let y = 30;
-    missing.forEach(p => {
-      doc.text(`• ${p.ref}  ${p.uds ? `(×${p.uds})` : ''}`, marginX, y);
-      y += 6;
-      if (y > H - 15) { doc.addPage(); y = 20; }
-    });
-    doc.setFontSize(9);
-    doc.setTextColor(120);
-    doc.text('Sube estas etiquetas desde Web → Subir etiquetas para incluirlas en próximos PDFs.', marginX, H - 12);
-  }
+  // NADA de página final con productos sin etiqueta — se avisa desde el UI.
+  return { blob: doc.output('blob'), missing };
+}
 
-  return doc.output('blob');
+// Del texto largo tipo "1 Whisky Americano JACK DANIEL´S Tennessee Old Nº 7
+// Botella 50 Cl. RIOJA" devuelve un nombre corto tipo "JACK DANIEL´S – Whisky".
+// Estrategia: si detecta una marca en MAYÚSCULAS de 2+ palabras, la pone
+// primera. Si no, coge las 3-4 primeras palabras.
+function shortProductLabel(descripcion) {
+  const d = String(descripcion || '').trim();
+  if (!d) return 'Producto';
+  // Quitar prefijo "1 " si viene incluido en la descripción.
+  const clean = d.replace(/^\s*\d+\s+/, '');
+  // Buscar la primera secuencia de 2+ palabras totalmente en mayúsculas
+  // (respetando tildes y letras acentuadas comunes en marcas comerciales).
+  const brandMatch = clean.match(/([A-ZÁÉÍÓÚÜÑ0-9´'.-]{2,}(?:\s+[A-ZÁÉÍÓÚÜÑ0-9´'.-]{2,}){0,3})/);
+  if (brandMatch) {
+    const brand = brandMatch[1].trim();
+    // Recortar la marca si es demasiado larga (>30 chars)
+    const brandShort = brand.length > 30 ? brand.slice(0, 28) + '…' : brand;
+    return brandShort;
+  }
+  // Fallback: primeras 4 palabras
+  const words = clean.split(/\s+/).slice(0, 4).join(' ');
+  return words.length > 40 ? words.slice(0, 38) + '…' : words;
 }
 
 // ---------- PDF de DESCRIPCIÓN ----------
@@ -209,36 +246,40 @@ export async function generateDescripcionPDF({
   const MUTED = [120, 115, 105];
   const GREEN = [64, 116, 66];  // verde del branding "lotesdeespana"
 
-  // ---------- BANDA VERDE DECORATIVA ----------
-  doc.setFillColor(...GREEN);
-  doc.rect(0, 0, W, 28, 'F');
-  const logo = await fetchLogoDataUrl();
-  if (logo) {
-    try { doc.addImage(logo, 'PNG', W / 2 - 22, 6, 44, 16); }
-    catch {}
+  // ---------- BANDA DECORATIVA (imagen full-width en la parte superior) ----------
+  const band = await fetchHeaderBandRenderable();
+  let headerH = 28;
+  if (band) {
+    const ratio = band.width / band.height;
+    headerH = W / ratio;
+    try { doc.addImage(band.dataUrl, 'JPEG', 0, 0, W, headerH); }
+    catch { headerH = 28; }
   } else {
-    // Fallback: texto placeholder centrado
+    // Fallback si la imagen no está disponible
+    doc.setFillColor(...GREEN);
+    doc.rect(0, 0, W, 28, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(18);
     doc.setTextColor(255, 255, 255);
     doc.text('lotesdeespana', W / 2, 18, { align: 'center' });
   }
 
-  let y = 36;
+  let y = headerH + 8;
 
-  // ---------- FOTO DEL LOTE ----------
+  // ---------- FOTO DEL LOTE (respetando proporción original) ----------
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
-      const maxW = W - marginX * 2 - 20;
-      const maxH = 110;
+      const maxW = W - marginX * 2;
+      const maxH = 105;
       const ratio = rendered.width / rendered.height;
+      // Contain: encaja dentro de (maxW × maxH) sin distorsionar.
       let drawW = maxW, drawH = maxW / ratio;
       if (drawH > maxH) { drawH = maxH; drawW = maxH * ratio; }
-      const drawX = marginX + ((W - marginX * 2) - drawW) / 2;
+      const drawX = (W - drawW) / 2;
       try {
         doc.addImage(rendered.dataUrl, 'JPEG', drawX, y, drawW, drawH);
-        y += drawH + 8;
+        y += drawH + 6;
       } catch {}
     }
   }
