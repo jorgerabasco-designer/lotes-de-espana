@@ -453,7 +453,7 @@ export default function WebScreen({ showInfo }) {
     <section className="screen wide web-screen">
       <header className="cat-head">
         <div>
-          <h1 className="cat-title">Web</h1>
+          <h1 className="cat-title">PDFs Web</h1>
           <p className="cat-sub">Sube etiquetas y fotos de lotes, y genera PDFs a partir del catálogo Excel maestro.</p>
         </div>
       </header>
