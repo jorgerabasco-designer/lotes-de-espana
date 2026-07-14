@@ -72,6 +72,9 @@ export const ALLOWED_EXCEL_EXTS = ['xlsx', 'xlsm', 'xls'];
 // ---------- ETIQUETAS ----------
 
 // Sube una foto de etiqueta. Devuelve { ok, ref, path, url } o { ok:false, error }.
+// Si ya existía otra versión con distinta extensión (ej. antes .jpg y ahora
+// se sube .png), la vieja se borra para no dejar duplicados que confundan a
+// getEtiquetaUrlByRef.
 export async function uploadEtiqueta(file) {
   if (!SUPABASE_READY) return { ok: false, error: 'Supabase no está conectado.' };
   const ext = extOf(file.name);
@@ -85,8 +88,26 @@ export async function uploadEtiqueta(file) {
   const path = `${ref}.${ext}`;
   const { error } = await supabase.storage
     .from(BUCKET_ETIQUETAS)
-    .upload(path, file, { upsert: true, contentType: file.type || undefined });
+    .upload(path, file, {
+      upsert: true,
+      // cacheControl bajo (5 min) para que las regeneraciones cercanas a una
+      // subida vean la nueva versión aunque nuestro cache-buster fallara.
+      cacheControl: '300',
+      contentType: file.type || undefined,
+    });
   if (error) return { ok: false, error: error.message || 'Error subiendo la etiqueta.' };
+
+  // Borra cualquier versión previa con distinta extensión (evita duplicados).
+  try {
+    const { data: siblings } = await supabase.storage
+      .from(BUCKET_ETIQUETAS)
+      .list('', { limit: 20, search: ref });
+    const stale = (siblings || [])
+      .filter(o => o.name.toUpperCase().startsWith(ref.toUpperCase() + '.') && o.name !== path)
+      .map(o => o.name);
+    if (stale.length) await supabase.storage.from(BUCKET_ETIQUETAS).remove(stale);
+  } catch { /* no fatal */ }
+
   return { ok: true, ref, path, url: publicUrl(BUCKET_ETIQUETAS, path) };
 }
 
@@ -112,20 +133,30 @@ export async function listEtiquetas() {
 }
 
 // Devuelve la URL pública de la etiqueta de una referencia (o null si no hay).
-// Añade "?v=<updated_at>" para invalidar el CDN de Supabase cuando el fichero
-// se sustituya con upsert (si no, el navegador y el CDN cachean la anterior).
+//
+// El URL lleva "?v=<updated_at>-<Date.now()>":
+//   · updated_at: normalmente basta, pero Supabase Storage a veces NO lo
+//     actualiza al hacer upsert → cache antigua.
+//   · Date.now(): garantía extra — cada llamada a esta función genera un URL
+//     distinto, así que el CDN/navegador NUNCA sirve una versión cacheada.
+//   Combinado: cada regeneración de PDF baja la última versión del fichero.
+//
+// Si por lo que sea hay más de un fichero con la misma ref (ej. .jpg y .png
+// convivientes), se elige el más reciente por updated_at.
 export async function getEtiquetaUrlByRef(ref) {
   if (!SUPABASE_READY || !ref) return null;
-  // list con search para pillar cualquier extensión.
   const { data } = await supabase.storage
     .from(BUCKET_ETIQUETAS)
     .list('', { limit: 20, search: ref });
   if (!data || !data.length) return null;
-  const hit = data.find(o => o.name.toUpperCase().startsWith(ref.toUpperCase() + '.'));
+  const matches = data
+    .filter(o => o.name.toUpperCase().startsWith(ref.toUpperCase() + '.'))
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+  const hit = matches[0];
   if (!hit) return null;
   const stamp = hit.updated_at || hit.created_at || '';
   const base = publicUrl(BUCKET_ETIQUETAS, hit.name);
-  return stamp ? `${base}?v=${encodeURIComponent(stamp)}` : base;
+  return `${base}?v=${stamp ? encodeURIComponent(stamp) + '-' : ''}${Date.now()}`;
 }
 
 export async function deleteEtiqueta(path) {
@@ -138,6 +169,8 @@ export async function deleteEtiqueta(path) {
 
 // Sube una foto de lote. El nº se extrae del nombre. Se guarda como
 // <NNN>_001.<ext> (nomenclatura 2026 del cliente).
+// Al subir, borra cualquier versión previa con distinta extensión para evitar
+// duplicados que confundan a getLotePhotoUrl.
 export async function uploadLotePhoto(file) {
   if (!SUPABASE_READY) return { ok: false, error: 'Supabase no está conectado.' };
   const ext = extOf(file.name);
@@ -151,8 +184,27 @@ export async function uploadLotePhoto(file) {
   const path = `${num}_001.${ext}`;
   const { error } = await supabase.storage
     .from(BUCKET_LOTES)
-    .upload(path, file, { upsert: true, contentType: file.type || undefined });
+    .upload(path, file, {
+      upsert: true,
+      cacheControl: '300',
+      contentType: file.type || undefined,
+    });
   if (error) return { ok: false, error: error.message || 'Error subiendo la foto del lote.' };
+
+  // Limpieza: borra cualquier fichero previo del mismo nº de lote con distinta
+  // ruta (ej. NNN.jpg legacy, o NNN_001 con otra extensión).
+  try {
+    const { data: siblings } = await supabase.storage
+      .from(BUCKET_LOTES)
+      .list('', { limit: 20, search: num });
+    const stale = (siblings || [])
+      .filter(o => (o.name === `${num}.jpg` || o.name === `${num}.png` || o.name === `${num}.webp`
+                    || o.name.startsWith(`${num}_`) || o.name.startsWith(`${num}.`))
+                && o.name !== path)
+      .map(o => o.name);
+    if (stale.length) await supabase.storage.from(BUCKET_LOTES).remove(stale);
+  } catch { /* no fatal */ }
+
   return { ok: true, numero: num, path, url: publicUrl(BUCKET_LOTES, path) };
 }
 
@@ -179,6 +231,8 @@ export async function listLotePhotos() {
     });
 }
 
+// Mismo cache-buster agresivo que getEtiquetaUrlByRef: updated_at + Date.now()
+// para garantizar que cada regeneración de PDF baja la última versión.
 export async function getLotePhotoUrl(numero) {
   if (!SUPABASE_READY || !numero) return null;
   const n = String(numero).trim();
@@ -187,12 +241,15 @@ export async function getLotePhotoUrl(numero) {
     .list('', { limit: 20, search: n });
   if (!data || !data.length) return null;
   // El nombre puede ser "NNN.jpg" o "NNN_001.jpg" (nomenclatura 2026).
-  const hit = data.find(o => o.name === `${n}.jpg` || o.name === `${n}.png` || o.name === `${n}.webp`
-                          || o.name.startsWith(`${n}_`) || o.name.startsWith(`${n}.`));
+  const matches = (data || [])
+    .filter(o => o.name === `${n}.jpg` || o.name === `${n}.png` || o.name === `${n}.webp`
+              || o.name.startsWith(`${n}_`) || o.name.startsWith(`${n}.`))
+    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+  const hit = matches[0];
   if (!hit) return null;
   const stamp = hit.updated_at || hit.created_at || '';
   const base = publicUrl(BUCKET_LOTES, hit.name);
-  return stamp ? `${base}?v=${encodeURIComponent(stamp)}` : base;
+  return `${base}?v=${stamp ? encodeURIComponent(stamp) + '-' : ''}${Date.now()}`;
 }
 
 export async function deleteLotePhoto(path) {
