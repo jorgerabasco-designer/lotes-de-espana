@@ -145,10 +145,13 @@ function decodeEntities(s) {
 // Pie de página que va al final de los PDFs de QR (viene del docx que Jorge nos pasó).
 const PIE_LEGAL = 'En caso de que se produzca rotura de stock de algún componente de nuestras referencias, nuestra empresa se reserva el derecho de sustituir cualquier producto por otro de igual o superior valor sin coste adicional. Se atienden reclamaciones hasta el 10 de enero.';
 
-// De la fila de tarifas saca el precio SIN IVA (base imponible).
-// Formato Excel: Ref | Pag | Nombre | B.Imp | Iva  → precio = B.Imp.
-// El IVA no se suma: en el PDF se muestra "{precio}€ + IVA" indicando que
-// el importe final lo incluirá aparte.
+// De la fila de tarifas saca { precio, titulo } por referencia:
+//   · precio = col D "B.Imp" (base imponible; el IVA no se suma, en el PDF
+//     se muestra "{precio}€ + IVA" indicando que el importe final lo incluirá
+//     aparte).
+//   · titulo = col C "Nombre Artículo" limpio de "REF. NNN" del final.
+//     Fuente principal para el título del PDF ("PEQUEÑOS MOMENTOS - REF. 100").
+// Formato Excel esperado: Ref | Pag | Nombre Artículo | B.Imp | Iva.
 function readTarifas(workbook) {
   if (!workbook) return new Map();
   const m = new Map();
@@ -156,9 +159,16 @@ function readTarifas(workbook) {
     const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, blankrows: false });
     for (const r of rows) {
       const ref = r[0];
+      const nombre = r[2];
       const base = Number(r[3]);
       if (ref == null || !isFinite(base)) continue;
-      m.set(String(ref).trim(), Math.round(base * 100) / 100);
+      const titulo = nombre
+        ? String(nombre).trim().replace(/\s+REF\.?\s*\d+\s*$/i, '').trim() || null
+        : null;
+      m.set(String(ref).trim(), {
+        precio: Math.round(base * 100) / 100,
+        titulo,
+      });
     }
   }
   return m;
@@ -453,12 +463,15 @@ export default function WebScreen({ showInfo }) {
       setGenProgress({ current: i, total: validos.length });
       const productos = readLoteSheet(excelWorkbook, num) || [];
       const entry      = nomenclaturaMap.get(num);
+      const tarifa     = tarifasMap.get(num);
       const nombrePdf  = entry?.nombre || `Lote ${num}.pdf`;
       const nombreBase = nombrePdf.replace(/\.pdf$/i, '');
-      // Título dentro del PDF: col C del Excel de nomenclatura si existe;
-      // si no, se deriva del nombre del fichero (comportamiento anterior).
-      const tipoLote   = entry?.titulo || tipoFromNomenclatura(nombrePdf) || 'LOTE';
-      const precio     = tarifasMap.get(num) ?? null;
+      // Título dentro del PDF. Orden de prioridad:
+      //   1. col C "Nombre Artículo" del Excel de Tarifas (fuente principal)
+      //   2. col C del Excel de nomenclatura (fallback opcional)
+      //   3. derivar del nombre del fichero
+      const tipoLote   = tarifa?.titulo || entry?.titulo || tipoFromNomenclatura(nombrePdf) || 'LOTE';
+      const precio     = tarifa?.precio ?? null;
       const fotoUrl    = await getLotePhotoUrl(num);
 
       try {
