@@ -832,6 +832,9 @@ export default function WebScreen({ showInfo }) {
         .excel-name{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;color:var(--ink)}
         .excel-name.empty{color:var(--muted);font-weight:500}
         .excel-meta{font-size:12px;color:var(--muted);margin-top:4px}
+        .excel-actions{display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
+        .excel-btn-icon{width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);cursor:pointer;transition:all .15s;text-decoration:none;flex-shrink:0}
+        .excel-btn-icon:hover{border-color:var(--ink);background:var(--bg);transform:translateY(-1px)}
         .excel-drop{display:inline-flex;align-items:center;gap:7px;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff;border:1px solid var(--accent);transition:all .15s;box-shadow:0 1px 2px rgba(167,77,74,.2)}
         .excel-drop:hover{background:var(--accent-2);transform:translateY(-1px)}
         .excel-drop.over{outline:2px dashed #fff;outline-offset:-4px}
@@ -908,16 +911,28 @@ function ExcelBlock({ title, subtitle, info, extraMeta, emptyMeta, uploading, dr
             </>
           )}
         </div>
-        <label
-          className={`excel-drop ${dragOver ? 'over' : ''} ${uploading ? 'busy' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
-        >
-          {I.upload({ size: 14 })}
-          {uploading ? 'Subiendo…' : (info ? 'Sustituir' : 'Subir Excel')}
-          <input type="file" accept=".xlsx,.xlsm,.xls" onChange={(e) => onFile(e.target.files?.[0])} hidden />
-        </label>
+        <div className="excel-actions">
+          {info?.url && (
+            <a
+              className="excel-btn-icon"
+              href={`${info.url}?dl=${encodeURIComponent(filenameLabel)}`}
+              title={`Descargar ${filenameLabel}`}
+              aria-label={`Descargar ${filenameLabel}`}
+            >
+              {I.download({ size: 14 })}
+            </a>
+          )}
+          <label
+            className={`excel-drop ${dragOver ? 'over' : ''} ${uploading ? 'busy' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}
+          >
+            {I.upload({ size: 14 })}
+            {uploading ? 'Subiendo…' : (info ? 'Sustituir' : 'Subir Excel')}
+            <input type="file" accept=".xlsx,.xlsm,.xls" onChange={(e) => onFile(e.target.files?.[0])} hidden />
+          </label>
+        </div>
       </div>
     </div>
   );
