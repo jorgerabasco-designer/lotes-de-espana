@@ -20,15 +20,15 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // ---------- helpers ----------
 
-// Calidad JPEG para las imágenes embebidas en el PDF. 0.85 es imperceptible
-// respecto a 0.95 en fotos, pero reduce el peso del stream ~40 %. Sube este
-// número si algún día se ven artefactos en la foto del lote o en las etiquetas.
-const JPEG_QUALITY = 0.85;
+// Calidad JPEG para las imágenes embebidas en el PDF. 0.95 mantiene la nitidez
+// original de las fotos (el cliente lo pidió expresamente: "que no tocamos la
+// calidad de las imágenes, siempre alta aunque el PDF pese más").
+const JPEG_QUALITY = 0.95;
 
 // Máximo de píxeles a lo largo del lado más grande de una imagen embebida.
-// Un PDF impreso a 300 DPI a página completa A4 son ~2480 px de ancho; por
-// encima de ese tamaño el detalle extra no se ve y solo hincha el PDF.
-const MAX_LONG_SIDE = 2200;
+// Solo se redimensionan imágenes descomunales; una foto 700×800 (o cualquier
+// otra por debajo de 2500 px) pasa tal cual sin perder calidad.
+const MAX_LONG_SIDE = 2500;
 
 // Toma un canvas y devuelve un {canvas, dataUrl, width, height} con la imagen
 // redimensionada si supera MAX_LONG_SIDE. Preserva el aspect ratio.
@@ -106,16 +106,27 @@ async function fetchLogoDataUrl() {
 }
 
 // Banda decorativa que va como header full-width en el PDF de descripción.
-// Se sirve desde /public/pdf-header.png. Cacheamos el data-url tras la 1ª carga.
-let _headerCache = null;
-async function fetchHeaderBandRenderable() {
-  if (_headerCache !== null) return _headerCache || null;
+// Dos variantes servidas desde /public:
+//   · pdf-header.png         → CON logo (para el QR con precio)
+//   · pdf-header-nologo.png  → SIN logo (para el QR sin precio)
+// Cacheamos el data-url tras la 1ª carga de cada una para no re-decodificar.
+const _headerCache = { 'con-precio': null, 'sin-precio': null };
+async function fetchHeaderBandRenderable(variant = 'con-precio') {
+  if (_headerCache[variant] !== null) return _headerCache[variant] || null;
+  const file = variant === 'sin-precio' ? '/pdf-header-nologo.png' : '/pdf-header.png';
   try {
-    const r = await fetchAsRenderable('/pdf-header.png');
-    _headerCache = r || false;
-    return r;
+    const r = await fetchAsRenderable(file);
+    if (r) { _headerCache[variant] = r; return r; }
+    // Fallback: si la variante "sin-logo" no existe todavía, cae a la normal.
+    if (variant === 'sin-precio') {
+      const r2 = await fetchAsRenderable('/pdf-header.png');
+      _headerCache[variant] = r2 || false;
+      return r2;
+    }
+    _headerCache[variant] = false;
+    return null;
   } catch {
-    _headerCache = false;
+    _headerCache[variant] = false;
     return null;
   }
 }
@@ -218,26 +229,36 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
 
 // Del texto largo tipo "1 Whisky Americano JACK DANIEL´S Tennessee Old Nº 7
 // Botella 50 Cl. RIOJA" devuelve un nombre corto tipo "JACK DANIEL´S – Whisky".
-// Estrategia: si detecta una marca en MAYÚSCULAS de 2+ palabras, la pone
-// primera. Si no, coge las 3-4 primeras palabras.
+// Estrategia: extrae la MARCA (secuencias de 2+ mayúsculas seguidas). Si no
+// encuentra, coge las 3-4 primeras palabras.
+//
+// Importante: cada palabra de la marca debe EMPEZAR por letra (no dígito), así
+// evitamos que "Queso 100% Oveja Leche Cruda CIUDAD DE SANSUEÑA" nos devuelva
+// "100" (bug del cliente).
 function shortProductLabel(descripcion) {
   const d = String(descripcion || '').trim();
   if (!d) return 'Producto';
   // Quitar prefijo "1 " si viene incluido en la descripción.
   const clean = d.replace(/^\s*\d+\s+/, '');
-  // Buscar la primera secuencia de 2+ palabras totalmente en mayúsculas
-  // (respetando tildes y letras acentuadas comunes en marcas comerciales).
-  const brandMatch = clean.match(/([A-ZÁÉÍÓÚÜÑ0-9´'.-]{2,}(?:\s+[A-ZÁÉÍÓÚÜÑ0-9´'.-]{2,}){0,3})/);
-  if (brandMatch) {
-    const brand = brandMatch[1].trim();
-    // Recortar la marca si es demasiado larga (>30 chars)
-    const brandShort = brand.length > 30 ? brand.slice(0, 28) + '…' : brand;
-    return brandShort;
+  // Coger todas las marcas candidatas (una o más palabras completamente en
+  // mayúsculas, cada palabra empezando por LETRA mayúscula) y quedarse con la
+  // más larga: normalmente es la marca comercial real.
+  const candRe = /(?:^|[^A-ZÁÉÍÓÚÜÑ])([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]{1,}(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*){0,4})/g;
+  const candidates = [];
+  let m;
+  while ((m = candRe.exec(clean))) candidates.push(m[1].trim());
+  if (candidates.length) {
+    // La "mejor" marca: la que tenga más letras alfabéticas (evita "S" o "II"
+    // y demás abreviaturas cortas).
+    candidates.sort((a, b) => alphaChars(b) - alphaChars(a));
+    const brand = candidates[0];
+    return brand.length > 30 ? brand.slice(0, 28) + '…' : brand;
   }
   // Fallback: primeras 4 palabras
   const words = clean.split(/\s+/).slice(0, 4).join(' ');
   return words.length > 40 ? words.slice(0, 38) + '…' : words;
 }
+function alphaChars(s) { return (s.match(/[A-ZÁÉÍÓÚÜÑ]/g) || []).length; }
 
 // ---------- PDF de DESCRIPCIÓN ----------
 
@@ -249,12 +270,14 @@ function shortProductLabel(descripcion) {
 //   · Pie legal en cursiva pequeña (viene del docx que subió Jorge)
 //
 // Parámetros:
-//   loteNumero:  "223"
-//   tipoLote:    "LOTES SURTIDOS"           (viene del prefijo de la nomenclatura)
-//   loteFotoUrl: URL de la foto del lote (bucket 'lotes')
-//   productos:   [{ uds, descripcion }]
-//   precio:      número o null            (si null → PDF "sin precio")
-//   pieLegal:    string (footer)
+//   loteNumero:    "223"
+//   tipoLote:      "LOTES SURTIDOS"           (viene del prefijo de la nomenclatura)
+//   loteFotoUrl:   URL de la foto del lote (bucket 'lotes')
+//   productos:     [{ uds, descripcion }]
+//   precio:        número o null              (si null → PDF "sin precio")
+//   pieLegal:      string (footer)
+//   headerVariant: 'con-precio' (por defecto) → banda decorativa con logo
+//                  'sin-precio'               → banda decorativa SIN logo
 export async function generateDescripcionPDF({
   loteNumero,
   tipoLote,
@@ -262,6 +285,7 @@ export async function generateDescripcionPDF({
   productos,
   precio = null,
   pieLegal = '',
+  headerVariant = 'con-precio',
 }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
   const W = 210, H = 297;
@@ -272,7 +296,7 @@ export async function generateDescripcionPDF({
   const GREEN = [64, 116, 66];  // verde del branding "lotesdeespana"
 
   // ---------- BANDA DECORATIVA (imagen full-width en la parte superior) ----------
-  const band = await fetchHeaderBandRenderable();
+  const band = await fetchHeaderBandRenderable(headerVariant);
   let headerH = 28;
   if (band) {
     const ratio = band.width / band.height;
@@ -329,19 +353,41 @@ export async function generateDescripcionPDF({
   y += 6;
 
   // ---------- LISTADO DE PRODUCTOS ----------
-  doc.setFontSize(10);
-  const lineH = 4.9;
-  const bodyMaxY = H - 25;
-
   // Anchos: bullet, cifra uds, descripción
   const bulletX = marginX;
   const udsX    = marginX + 3;
   const udsMaxW = 6;
   const descX   = udsX + udsMaxW + 1.2;
   const descMaxW = W - marginX - descX;
+  const bodyStartY = y;
+  const bodyMaxY = H - 25; // deja espacio abajo para línea + pie legal
 
-  for (const p of productos) {
-    if (y > bodyMaxY - lineH) { doc.addPage(); y = 22; }
+  // Shrink-to-fit: probamos tamaños de letra de más grande a más pequeño hasta
+  // que TODOS los productos quepan en 1 página. El cliente pidió expresamente
+  // que nunca se pase a página 2, aunque el texto salga pequeño.
+  const FS_MAX = 10.5, FS_MIN = 6.5, FS_STEP = 0.25;
+  let chosenSize = FS_MIN, wrappedByProduct = null;
+  for (let fs = FS_MAX; fs >= FS_MIN - 0.001; fs -= FS_STEP) {
+    doc.setFontSize(fs);
+    const lineH = fs * 0.48; // ~ interlínea razonable para helvetica
+    const wraps = productos.map(p => doc.splitTextToSize((p.descripcion || '(sin descripción)').trim(), descMaxW));
+    const totalLines = wraps.reduce((n, ls) => n + ls.length, 0);
+    const totalH = totalLines * lineH;
+    if (bodyStartY + totalH <= bodyMaxY) {
+      chosenSize = fs;
+      wrappedByProduct = wraps;
+      break;
+    }
+    // Guardamos siempre el último por si nada cupo con FS_MIN
+    chosenSize = fs;
+    wrappedByProduct = wraps;
+  }
+  const lineH = chosenSize * 0.48;
+  doc.setFontSize(chosenSize);
+
+  for (let pi = 0; pi < productos.length; pi++) {
+    const p = productos[pi];
+    const lines = wrappedByProduct[pi];
 
     // Bullet gris
     doc.setFont('helvetica', 'normal');
@@ -352,15 +398,10 @@ export async function generateDescripcionPDF({
     doc.setTextColor(...INK);
     doc.text(`${p.uds || 1}`, udsX, y);
 
-    // Descripción con marcas en negrita (todo lo que esté en MAYÚSCULAS+ se
-    // deja tal cual — el ojo ya lo percibe destacado; jsPDF no soporta rangos
-    // de bold parcial fácilmente sin fuentes embebidas).
-    const desc = (p.descripcion || '(sin descripción)').trim();
-    const lines = doc.splitTextToSize(desc, descMaxW);
-    for (let li = 0; li < lines.length; li++) {
-      if (y > bodyMaxY - lineH) { doc.addPage(); y = 22; }
-      doc.setTextColor(...INK);
-      doc.text(lines[li], descX, y);
+    // Descripción con marcas EN NEGRITA. Detectamos cada palabra en mayúsculas
+    // seguidas (marca comercial) y las pintamos con setFont('helvetica','bold').
+    for (const line of lines) {
+      renderMixedBoldLine(doc, line, descX, y);
       y += lineH;
     }
   }
@@ -388,4 +429,32 @@ export async function generateDescripcionPDF({
   }
 
   return doc.output('blob');
+}
+
+// Pinta una línea de texto alternando entre 'normal' y 'bold' según detecte
+// secuencias de MAYÚSCULAS (marcas comerciales). Respeta la fuente y tamaño
+// que ya estén activos en el documento; solo cambia el weight.
+//
+// Ejemplo: "1 Cava Brut FREIXENET Botella 75 Cl." →
+//   "1 Cava Brut " (normal) + "FREIXENET" (bold) + " Botella 75 Cl." (normal)
+//
+// La marca debe empezar por letra mayúscula (no dígito) para no cazar cosas
+// como "100%".
+function renderMixedBoldLine(doc, line, x, y) {
+  const re = /([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*)*)/g;
+  let cursor = 0, tx = x, m;
+  const parts = [];
+  while ((m = re.exec(line))) {
+    if (m.index > cursor) parts.push({ text: line.slice(cursor, m.index), bold: false });
+    parts.push({ text: m[0], bold: true });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < line.length) parts.push({ text: line.slice(cursor), bold: false });
+
+  for (const part of parts) {
+    if (!part.text) continue;
+    doc.setFont('helvetica', part.bold ? 'bold' : 'normal');
+    doc.text(part.text, tx, y);
+    tx += doc.getTextWidth(part.text);
+  }
 }

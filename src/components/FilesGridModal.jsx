@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import JSZip from 'jszip';
 import { I } from './icons.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 
@@ -14,10 +15,11 @@ import ConfirmModal from './ConfirmModal.jsx';
 //   onDelete       async (item) => void
 //   emptyText      texto cuando items=[]
 //   searchPlaceholder texto del buscador
-export default function FilesGridModal({ open, onClose, title, items = [], onDelete, emptyText, searchPlaceholder = 'Buscar…' }) {
+export default function FilesGridModal({ open, onClose, title, items = [], onDelete, emptyText, searchPlaceholder = 'Buscar…', zipBaseName = 'ficheros' }) {
   const [query, setQuery] = useState('');
   const [confirmDel, setConfirmDel] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [downloading, setDownloading] = useState(null); // { done, total }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -43,6 +45,39 @@ export default function FilesGridModal({ open, onClose, title, items = [], onDel
     return (n / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  // Descarga todos los ficheros filtrados y los empaqueta en un ZIP para que
+  // el usuario los baje de una vez.
+  const downloadAllZip = async () => {
+    const list = filtered;
+    if (!list.length) return;
+    setDownloading({ done: 0, total: list.length });
+    const zip = new JSZip();
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      try {
+        const res = await fetch(it.url);
+        if (res.ok) {
+          const buf = await res.arrayBuffer();
+          // Nombre del fichero dentro del ZIP: usa el path original si existe,
+          // si no, un nombre a partir del label + extensión inferida de la URL.
+          const filename = it.path || `${String(it.label).replace(/[/\\?%*:|"<>]/g, '')}.${(it.url.split('.').pop() || 'jpg').split('?')[0]}`;
+          zip.file(filename, buf);
+        }
+      } catch (e) {
+        console.warn('No se pudo descargar', it.url, e);
+      }
+      setDownloading({ done: i + 1, total: list.length });
+    }
+    const content = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${zipBaseName}-${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setDownloading(null);
+  };
+
   return (
     <div className="fgm-back" onClick={onClose}>
       <div className="fgm-modal" onClick={e => e.stopPropagation()}>
@@ -67,6 +102,17 @@ export default function FilesGridModal({ open, onClose, title, items = [], onDel
                 </button>
               )}
             </div>
+            <button
+              className="fgm-dlall"
+              onClick={downloadAllZip}
+              disabled={!filtered.length || !!downloading}
+              title="Descargar todas en un ZIP"
+            >
+              {I.download({ size: 14 })}
+              {downloading
+                ? `Descargando ${downloading.done}/${downloading.total}…`
+                : `Descargar ${filtered.length === items.length ? 'todas' : filtered.length} (ZIP)`}
+            </button>
             <button className="fgm-close" onClick={onClose} aria-label="Cerrar">{I.close({ size: 18 })}</button>
           </div>
         </header>
@@ -136,6 +182,9 @@ export default function FilesGridModal({ open, onClose, title, items = [], onDel
           .fgm-search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
           .fgm-search input{flex:1;border:none;background:none;outline:none;font-size:13.5px;color:var(--ink);font-family:inherit;min-width:0}
           .fgm-clear{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:var(--muted);background:transparent;border:none;flex-shrink:0;cursor:pointer}
+          .fgm-dlall{height:38px;padding:0 14px;display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;box-shadow:0 1px 2px rgba(167,77,74,.2);white-space:nowrap}
+          .fgm-dlall:hover:not(:disabled){background:var(--accent-2);transform:translateY(-1px)}
+          .fgm-dlall:disabled{opacity:.5;cursor:not-allowed}
 
           .fgm-body{padding:16px 22px;overflow-y:auto;flex:1;min-height:0}
           .fgm-empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13.5px}

@@ -96,7 +96,11 @@ function readTarifas(workbook) {
   return m;
 }
 
-// De la fila de nomenclatura saca el nombre del PDF por referencia de lote.
+// De la fila de nomenclatura saca:
+//   { nombre } = "Cestas - Baúles y Lotes Sorteo 513.pdf"  (col B, nombre del fichero)
+//   { titulo } = "Cestas y Baúles"                        (col C, opcional,
+//                título a mostrar DENTRO del PDF; si no hay, se deriva del
+//                nombre del fichero por compatibilidad)
 function readNomenclatura(workbook) {
   if (!workbook) return new Map();
   const m = new Map();
@@ -105,8 +109,12 @@ function readNomenclatura(workbook) {
     for (const r of rows) {
       const ref = r[0];
       const nombre = r[1];
+      const titulo = r[2];
       if (ref == null || !nombre) continue;
-      m.set(String(ref).trim(), String(nombre).trim());
+      m.set(String(ref).trim(), {
+        nombre: String(nombre).trim(),
+        titulo: titulo ? String(titulo).trim() : null,
+      });
     }
   }
   return m;
@@ -370,11 +378,14 @@ export default function WebScreen({ showInfo }) {
       const num = validos[i];
       setGenProgress({ current: i, total: validos.length });
       const productos = readLoteSheet(excelWorkbook, num) || [];
-      const nombrePdf   = nomenclaturaMap.get(num) || `Lote ${num}.pdf`;
-      const nombreBase  = nombrePdf.replace(/\.pdf$/i, '');
-      const tipoLote    = tipoFromNomenclatura(nombrePdf) || 'LOTE';
-      const precio      = tarifasMap.get(num) ?? null;
-      const fotoUrl     = await getLotePhotoUrl(num);
+      const entry      = nomenclaturaMap.get(num);
+      const nombrePdf  = entry?.nombre || `Lote ${num}.pdf`;
+      const nombreBase = nombrePdf.replace(/\.pdf$/i, '');
+      // Título dentro del PDF: col C del Excel de nomenclatura si existe;
+      // si no, se deriva del nombre del fichero (comportamiento anterior).
+      const tipoLote   = entry?.titulo || tipoFromNomenclatura(nombrePdf) || 'LOTE';
+      const precio     = tarifasMap.get(num) ?? null;
+      const fotoUrl    = await getLotePhotoUrl(num);
 
       try {
         const withUrls = await Promise.all(productos.map(async (p) => ({
@@ -390,12 +401,14 @@ export default function WebScreen({ showInfo }) {
         const conPrecioBlob = await generateDescripcionPDF({
           loteNumero: num, tipoLote, loteFotoUrl: fotoUrl, productos, precio,
           pieLegal: PIE_LEGAL,
+          headerVariant: 'con-precio',
         });
         carpetaConPrecio.file(nombrePdf, conPrecioBlob);
 
         const sinPrecioBlob = await generateDescripcionPDF({
           loteNumero: num, tipoLote, loteFotoUrl: fotoUrl, productos, precio: null,
           pieLegal: PIE_LEGAL,
+          headerVariant: 'sin-precio',
         });
         carpetaSinPrecio.file(nombrePdf, sinPrecioBlob);
       } catch (e) {
@@ -640,6 +653,7 @@ export default function WebScreen({ showInfo }) {
         onDelete={handleDeleteEtiqueta}
         searchPlaceholder="Buscar por referencia…"
         emptyText="Aún no has subido ninguna etiqueta."
+        zipBaseName="etiquetas"
       />
       <FilesGridModal
         open={showLotesList}
@@ -657,6 +671,7 @@ export default function WebScreen({ showInfo }) {
         onDelete={handleDeleteLotePhoto}
         searchPlaceholder="Buscar por nº de lote…"
         emptyText="Aún no has subido ninguna foto de lote."
+        zipBaseName="fotos-lotes"
       />
 
       {/* Modal de referencias sin etiqueta */}

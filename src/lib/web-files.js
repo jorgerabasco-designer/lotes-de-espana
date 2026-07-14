@@ -107,6 +107,8 @@ export async function listEtiquetas() {
 }
 
 // Devuelve la URL pública de la etiqueta de una referencia (o null si no hay).
+// Añade "?v=<updated_at>" para invalidar el CDN de Supabase cuando el fichero
+// se sustituya con upsert (si no, el navegador y el CDN cachean la anterior).
 export async function getEtiquetaUrlByRef(ref) {
   if (!SUPABASE_READY || !ref) return null;
   // list con search para pillar cualquier extensión.
@@ -116,7 +118,9 @@ export async function getEtiquetaUrlByRef(ref) {
   if (!data || !data.length) return null;
   const hit = data.find(o => o.name.toUpperCase().startsWith(ref.toUpperCase() + '.'));
   if (!hit) return null;
-  return publicUrl(BUCKET_ETIQUETAS, hit.name);
+  const stamp = hit.updated_at || hit.created_at || '';
+  const base = publicUrl(BUCKET_ETIQUETAS, hit.name);
+  return stamp ? `${base}?v=${encodeURIComponent(stamp)}` : base;
 }
 
 export async function deleteEtiqueta(path) {
@@ -170,9 +174,13 @@ export async function getLotePhotoUrl(numero) {
     .from(BUCKET_LOTES)
     .list('', { limit: 20, search: n });
   if (!data || !data.length) return null;
-  const hit = data.find(o => o.name.startsWith(n + '.'));
+  // El nombre puede ser "NNN.jpg" o "NNN_001.jpg" (nomenclatura 2026).
+  const hit = data.find(o => o.name === `${n}.jpg` || o.name === `${n}.png` || o.name === `${n}.webp`
+                          || o.name.startsWith(`${n}_`) || o.name.startsWith(`${n}.`));
   if (!hit) return null;
-  return publicUrl(BUCKET_LOTES, hit.name);
+  const stamp = hit.updated_at || hit.created_at || '';
+  const base = publicUrl(BUCKET_LOTES, hit.name);
+  return stamp ? `${base}?v=${encodeURIComponent(stamp)}` : base;
 }
 
 export async function deleteLotePhoto(path) {
