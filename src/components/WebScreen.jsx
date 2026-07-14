@@ -691,7 +691,7 @@ export default function WebScreen({ showInfo }) {
         <div className="web-block">
           <div className="web-blockh">
             <h3>Fotos de lotes</h3>
-            <p>Fotos de los lotes ya montados. El número se extrae del nombre del fichero (ej. <code>lote-de-navidad-surtido-<b>216</b>.jpg</code>) y se renombra a <code>216.jpg</code>.</p>
+            <p>Fotos de los lotes ya montados. El número se extrae del nombre del fichero (ej. <code>lote-de-navidad-surtido-<b>216</b>.jpg</code>) y se renombra a <code>216_001.jpg</code>.</p>
           </div>
           <UploadDrop
             label="Arrastra aquí fotos de lotes o pulsa para seleccionar"

@@ -47,15 +47,20 @@ export function extractRefFromFilename(name) {
   return m ? m[1] : null;
 }
 
-// Del nombre de fichero saca el número de lote (último grupo de dígitos
-// antes de la extensión). "lote-de-navidad-surtido-216.jpg" → "216".
+// Del nombre de fichero saca el número de lote. Reconoce ambos formatos:
+//   · Formato 2026 del cliente:  "216_001.jpg"                → "216"
+//     (los 3+ primeros dígitos = nº de lote; "_001" es sufijo de versión)
+//   · Formato antiguo de la web: "lote-de-navidad-surtido-216.jpg" → "216"
+//     (último grupo de dígitos antes de la extensión)
 export function extractLoteNumberFromFilename(name) {
   if (!name) return null;
   const base = String(name).split('/').pop().replace(/\.[^.]+$/, '');
+  // 1) Prioridad al patrón "NNN..." al inicio del nombre (formato 2026).
+  const startMatch = base.match(/^(\d{2,})/);
+  if (startMatch) return startMatch[1];
+  // 2) Fallback: último grupo de dígitos (formato antiguo).
   const groups = base.match(/(\d+)/g);
   if (!groups || !groups.length) return null;
-  // El nº de lote suele ser el último grupo (los prefijos como "lote-de-
-  // navidad-surtido-" no tienen dígitos).
   return groups[groups.length - 1];
 }
 
@@ -131,7 +136,8 @@ export async function deleteEtiqueta(path) {
 
 // ---------- LOTES ----------
 
-// Sube una foto de lote. El nº se extrae del nombre. Se guarda como <NNN>.<ext>.
+// Sube una foto de lote. El nº se extrae del nombre. Se guarda como
+// <NNN>_001.<ext> (nomenclatura 2026 del cliente).
 export async function uploadLotePhoto(file) {
   if (!SUPABASE_READY) return { ok: false, error: 'Supabase no está conectado.' };
   const ext = extOf(file.name);
@@ -140,9 +146,9 @@ export async function uploadLotePhoto(file) {
   }
   const num = extractLoteNumberFromFilename(file.name);
   if (!num) {
-    return { ok: false, error: `El nombre "${file.name}" no contiene un número de lote (necesita al menos un grupo de dígitos, ej. lote-216.jpg).` };
+    return { ok: false, error: `El nombre "${file.name}" no contiene un número de lote (necesita al menos un grupo de dígitos, ej. 216_001.jpg).` };
   }
-  const path = `${num}.${ext}`;
+  const path = `${num}_001.${ext}`;
   const { error } = await supabase.storage
     .from(BUCKET_LOTES)
     .upload(path, file, { upsert: true, contentType: file.type || undefined });
@@ -158,13 +164,19 @@ export async function listLotePhotos() {
   if (error) throw new Error(error.message);
   return (data || [])
     .filter(o => o.name && !o.name.startsWith('.'))
-    .map(o => ({
-      numero: o.name.replace(/\.[^.]+$/, ''),
-      path: o.name,
-      url: publicUrl(BUCKET_LOTES, o.name),
-      size: o.metadata?.size || 0,
-      updatedAt: o.updated_at || o.created_at || null,
-    }));
+    .map(o => {
+      // Nombre en el bucket: NNN_001.jpg (o legacy NNN.jpg). Para el listado
+      // mostramos solo el nº de lote (sin el sufijo de versión).
+      const base = o.name.replace(/\.[^.]+$/, '');
+      const numero = base.split('_')[0] || base;
+      return {
+        numero,
+        path: o.name,
+        url: publicUrl(BUCKET_LOTES, o.name),
+        size: o.metadata?.size || 0,
+        updatedAt: o.updated_at || o.created_at || null,
+      };
+    });
 }
 
 export async function getLotePhotoUrl(numero) {
