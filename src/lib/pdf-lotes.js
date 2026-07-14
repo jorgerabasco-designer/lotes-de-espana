@@ -189,7 +189,7 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
 
     const p = withUrl[i];
     // Titulillo: nombre corto del producto (nombre + marca), NO el RP.
-    const label = shortProductLabel(p.descripcion);
+    const label = shortProductLabel(p.descripcion, p.runs);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(45, 42, 38);
@@ -227,34 +227,43 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
   return { blob: doc.output('blob'), missing };
 }
 
-// Del texto largo tipo "1 Whisky Americano JACK DANIEL´S Tennessee Old Nº 7
-// Botella 50 Cl. RIOJA" devuelve un nombre corto tipo "JACK DANIEL´S – Whisky".
-// Estrategia: extrae la MARCA (secuencias de 2+ mayúsculas seguidas). Si no
-// encuentra, coge las 3-4 primeras palabras.
+// Título del bloque de una etiqueta trasera en el PDF (2×2).
 //
-// Importante: cada palabra de la marca debe EMPEZAR por letra (no dígito), así
-// evitamos que "Queso 100% Oveja Leche Cruda CIUDAD DE SANSUEÑA" nos devuelva
-// "100" (bug del cliente).
-function shortProductLabel(descripcion) {
+// Estrategia (por orden de preferencia):
+//   1. Si tenemos `runs` del Excel: coger TODOS los runs con bold=true, en el
+//      orden en que aparecen. Ese es el nombre que Jorge quiere ("las palabras
+//      que son marcas en mayúsculas que están en negrita").
+//   2. Fallback sin rich text: coger la marca detectada por regex (secuencias
+//      de MAYÚSCULAS que empiecen por letra, no dígito).
+//   3. Fallback total: primeras 4 palabras de la descripción.
+function shortProductLabel(descripcion, runs) {
+  // --- 1. Runs del Excel ---
+  if (Array.isArray(runs) && runs.length) {
+    const boldTexts = runs
+      .filter(r => r.bold && String(r.text).trim().length >= 2)
+      .map(r => String(r.text).trim());
+    if (boldTexts.length) {
+      // Concatenar respetando el orden. Ej: "MUCHAS MANOS" ya viene como un
+      // run bold único; si hubiera 2 marcas bold separadas por texto normal
+      // (raro), las unimos con " · " para mantener las dos visibles.
+      const brand = boldTexts.join(' · ');
+      return brand.length > 30 ? brand.slice(0, 28) + '…' : brand;
+    }
+  }
+  // --- 2. Regex de MAYÚSCULAS ---
   const d = String(descripcion || '').trim();
   if (!d) return 'Producto';
-  // Quitar prefijo "1 " si viene incluido en la descripción.
   const clean = d.replace(/^\s*\d+\s+/, '');
-  // Coger todas las marcas candidatas (una o más palabras completamente en
-  // mayúsculas, cada palabra empezando por LETRA mayúscula) y quedarse con la
-  // más larga: normalmente es la marca comercial real.
   const candRe = /(?:^|[^A-ZÁÉÍÓÚÜÑ])([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]{1,}(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*){0,4})/g;
   const candidates = [];
   let m;
   while ((m = candRe.exec(clean))) candidates.push(m[1].trim());
   if (candidates.length) {
-    // La "mejor" marca: la que tenga más letras alfabéticas (evita "S" o "II"
-    // y demás abreviaturas cortas).
     candidates.sort((a, b) => alphaChars(b) - alphaChars(a));
     const brand = candidates[0];
     return brand.length > 30 ? brand.slice(0, 28) + '…' : brand;
   }
-  // Fallback: primeras 4 palabras
+  // --- 3. Últimos recursos ---
   const words = clean.split(/\s+/).slice(0, 4).join(' ');
   return words.length > 40 ? words.slice(0, 38) + '…' : words;
 }
@@ -319,8 +328,8 @@ export async function generateDescripcionPDF({
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
-      const maxW = W - marginX * 2;
-      const maxH = 105;
+      const maxW = W - marginX * 2 - 20; // un poco de aire lateral
+      const maxH = 78;                    // más pequeña para ganar sitio al listado
       const ratio = rendered.width / rendered.height;
       // Contain: encaja dentro de (maxW × maxH) sin distorsionar.
       let drawW = maxW, drawH = maxW / ratio;
@@ -362,48 +371,43 @@ export async function generateDescripcionPDF({
   const bodyStartY = y;
   const bodyMaxY = H - 25; // deja espacio abajo para línea + pie legal
 
-  // Shrink-to-fit: probamos tamaños de letra de más grande a más pequeño hasta
-  // que TODOS los productos quepan en 1 página. El cliente pidió expresamente
-  // que nunca se pase a página 2, aunque el texto salga pequeño.
+  // Cada producto trae `runs` desde el Excel (rich text bold parcial). Para el
+  // wrapping tokenizamos a nivel de palabra respetando el weight de cada palabra.
+  const productWords = productos.map(p => runsToWords(p.runs, p.descripcion));
+
+  // Shrink-to-fit: probamos tamaños de letra hasta que todo quepa en 1 página.
   const FS_MAX = 10.5, FS_MIN = 6.5, FS_STEP = 0.25;
-  let chosenSize = FS_MIN, wrappedByProduct = null;
+  let chosenSize = FS_MIN;
   for (let fs = FS_MAX; fs >= FS_MIN - 0.001; fs -= FS_STEP) {
     doc.setFontSize(fs);
-    const lineH = fs * 0.48; // ~ interlínea razonable para helvetica
-    const wraps = productos.map(p => doc.splitTextToSize((p.descripcion || '(sin descripción)').trim(), descMaxW));
-    const totalLines = wraps.reduce((n, ls) => n + ls.length, 0);
-    const totalH = totalLines * lineH;
-    if (bodyStartY + totalH <= bodyMaxY) {
+    const lineH = fs * 0.48;
+    let totalLines = 0;
+    for (const words of productWords) {
+      totalLines += countWrappedLines(doc, words, descMaxW);
+    }
+    if (bodyStartY + totalLines * lineH <= bodyMaxY) {
       chosenSize = fs;
-      wrappedByProduct = wraps;
       break;
     }
-    // Guardamos siempre el último por si nada cupo con FS_MIN
     chosenSize = fs;
-    wrappedByProduct = wraps;
   }
   const lineH = chosenSize * 0.48;
   doc.setFontSize(chosenSize);
 
   for (let pi = 0; pi < productos.length; pi++) {
     const p = productos[pi];
-    const lines = wrappedByProduct[pi];
+    const words = productWords[pi];
 
-    // Bullet gris
+    // Bullet gris + nº de unidades (fila de arranque)
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...MUTED);
     doc.text('•', bulletX, y);
-
-    // Nº de unidades
     doc.setTextColor(...INK);
     doc.text(`${p.uds || 1}`, udsX, y);
 
-    // Descripción con marcas EN NEGRITA. Detectamos cada palabra en mayúsculas
-    // seguidas (marca comercial) y las pintamos con setFont('helvetica','bold').
-    for (const line of lines) {
-      renderMixedBoldLine(doc, line, descX, y);
-      y += lineH;
-    }
+    // Descripción con bold parcial exacto al del Excel (runs). Devuelve el
+    // nuevo y tras pintar todas las líneas de este producto.
+    y = renderWordsWrapped(doc, words, descX, y, descMaxW, lineH);
   }
 
   // Línea gruesa antes del pie legal
@@ -457,4 +461,68 @@ function renderMixedBoldLine(doc, line, x, y) {
     doc.text(part.text, tx, y);
     tx += doc.getTextWidth(part.text);
   }
+}
+
+// ---------- WRAPPING RESPETANDO NEGRITAS DEL EXCEL ----------
+//
+// `runs` = [{ text, bold }] con el formato real del Excel. Los partimos en
+// "palabras" (tokens no-espacio) preservando el weight de cada una. El
+// wrapping se hace midiendo el ancho con la fuente correcta.
+//
+// Si `runs` viene vacío (caso legacy sin rich text), caemos a un único run
+// normal con la descripción completa.
+function runsToWords(runs, fallbackText) {
+  const src = (runs && runs.length) ? runs : [{ text: fallbackText || '', bold: false }];
+  const words = [];
+  for (const run of src) {
+    const parts = String(run.text).split(/(\s+)/);
+    for (const part of parts) {
+      if (!part) continue;
+      words.push({ text: part, bold: !!run.bold, ws: /^\s+$/.test(part) });
+    }
+  }
+  return words;
+}
+
+// Cuenta cuántas líneas ocupará el listado de `words` dentro de `maxW` con la
+// fuente/tamaño activos en `doc`. Usa el mismo algoritmo que renderWordsWrapped
+// pero sin pintar.
+function countWrappedLines(doc, words, maxW) {
+  let x = 0, lines = 1;
+  for (const w of words) {
+    doc.setFont('helvetica', w.bold ? 'bold' : 'normal');
+    const ww = doc.getTextWidth(w.text);
+    if (w.ws) {
+      if (x === 0) continue; // ignorar espacio al inicio de línea
+      x += ww;
+      continue;
+    }
+    if (x + ww > maxW && x > 0) { lines++; x = 0; }
+    x += ww;
+  }
+  return lines;
+}
+
+// Pinta `words` a partir de (x, y) haciendo wrap en `maxW`. Cada palabra usa
+// su weight (bold del Excel). Devuelve el nuevo `y` tras pintar todas las
+// líneas (para que el caller siga desde ahí).
+function renderWordsWrapped(doc, words, x, y, maxW, lineH) {
+  let cx = x;
+  for (const w of words) {
+    doc.setFont('helvetica', w.bold ? 'bold' : 'normal');
+    const ww = doc.getTextWidth(w.text);
+    if (w.ws) {
+      if (cx === x) continue;
+      doc.text(w.text, cx, y);
+      cx += ww;
+      continue;
+    }
+    if (cx + ww > x + maxW && cx > x) {
+      cx = x;
+      y += lineH;
+    }
+    doc.text(w.text, cx, y);
+    cx += ww;
+  }
+  return y + lineH;
 }

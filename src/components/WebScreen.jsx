@@ -55,23 +55,91 @@ function parseLoteInput(str) {
   return out;
 }
 
-// Del sheet de un lote saca [{ ref, uds, descripcion }].
+// Del sheet de un lote saca [{ ref, uds, descripcion, runs }].
+//
+// `descripcion` es el texto plano de la col C (para búsquedas, fallback de
+// nombre, etc.). `runs` es un array [{ text, bold }] con el formato REAL del
+// Excel (bold parcial de las marcas), listo para pintar en el PDF preservando
+// el mismo formato que ve el usuario en el Excel.
 function readLoteSheet(workbook, loteNum) {
   const name = String(loteNum);
   const ws = workbook.Sheets[name];
   if (!ws) return null;
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
+  const ref = ws['!ref'];
+  if (!ref) return null;
+  const range = XLSX.utils.decode_range(ref);
+
   const productos = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i] || [];
-    // Columnas: 0 = ART/RP, 1 = UDS., 2 = DESCRIPCION
-    const ref = r[0] ? String(r[0]).trim().toUpperCase() : '';
-    const uds = Number(r[1]) || 1;
-    const descripcion = r[2] ? String(r[2]).trim() : '';
-    if (!ref && !descripcion) continue;
-    productos.push({ ref, uds, descripcion });
+  // Fila 0 = cabecera → arrancamos en +1.
+  for (let R = range.s.r + 1; R <= range.e.r; R++) {
+    const refCell  = ws[XLSX.utils.encode_cell({ c: 0, r: R })];
+    const udsCell  = ws[XLSX.utils.encode_cell({ c: 1, r: R })];
+    const descCell = ws[XLSX.utils.encode_cell({ c: 2, r: R })];
+
+    const refVal = refCell?.v != null ? String(refCell.v).trim().toUpperCase() : '';
+    const uds    = Number(udsCell?.v) || 1;
+    const descripcion = descCell?.v != null ? String(descCell.v).trim() : '';
+    if (!refVal && !descripcion) continue;
+
+    productos.push({
+      ref: refVal,
+      uds,
+      descripcion,
+      runs: cellToRuns(descCell),
+    });
   }
   return productos;
+}
+
+// De una celda de xlsx saca los runs [{ text, bold }].
+// SheetJS pone en cell.h el HTML con <b>…</b> cuando la celda tiene rich text
+// (siempre que hayamos leído con cellStyles+cellHTML). Si no hay rich text,
+// devuelve un único run normal con el valor.
+function cellToRuns(cell) {
+  if (!cell) return [{ text: '', bold: false }];
+  const value = String(cell.v ?? '').trim();
+  const html = cell.h && typeof cell.h === 'string' ? cell.h : '';
+  // Sin marcadores de bold → un run plano
+  if (!html || !/<(b|strong)[\s>]/i.test(html)) {
+    return [{ text: value, bold: false }];
+  }
+  return parseHtmlToRuns(html);
+}
+
+// Parser sencillo de HTML → runs bold/normal. Solo entiende <b> y <strong>
+// (que es lo que emite SheetJS para rich text). Descarta cualquier otro tag.
+function parseHtmlToRuns(html) {
+  const runs = [];
+  // Normalizamos: <strong> → <b>, </strong> → </b>; quitamos <br> por espacio.
+  const norm = String(html)
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/?strong[^>]*>/gi, (m) => m[1] === '/' ? '</b>' : '<b>')
+    .replace(/<span[^>]*font-weight\s*:\s*(?:bold|[6-9]00)[^>]*>/gi, '<b>')
+    .replace(/<\/span>/gi, '</b>');
+  const re = /<b[^>]*>([\s\S]*?)<\/b>|([^<]+)/gi;
+  let m;
+  while ((m = re.exec(norm))) {
+    if (m[1] != null) runs.push({ text: decodeEntities(m[1]).replace(/\s+/g, ' '), bold: true });
+    else if (m[2] != null) runs.push({ text: decodeEntities(m[2]).replace(/\s+/g, ' '), bold: false });
+  }
+  // Compactar runs vacíos y consecutivos del mismo tipo.
+  const out = [];
+  for (const r of runs) {
+    if (!r.text) continue;
+    const last = out[out.length - 1];
+    if (last && last.bold === r.bold) last.text += r.text;
+    else out.push({ ...r });
+  }
+  return out.length ? out : [{ text: '', bold: false }];
+}
+function decodeEntities(s) {
+  return String(s)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
 }
 
 // Pie de página que va al final de los PDFs de QR (viene del docx que Jorge nos pasó).
@@ -182,7 +250,10 @@ export default function WebScreen({ showInfo }) {
         if (info) {
           const buf = await fetchMasterExcelBuffer();
           setExcelBuffer(buf);
-          setExcelWorkbook(XLSX.read(buf, { type: 'array' }));
+          // cellStyles + cellHTML: para preservar rich text runs (bold parcial
+          // en la descripción de cada producto) — necesario para pintar la
+          // marca en negrita en el PDF como está en el Excel.
+          setExcelWorkbook(XLSX.read(buf, { type: 'array', cellStyles: true, cellHTML: true }));
         }
       } catch (e) { console.warn('Excel maestro no disponible:', e); }
       try {
@@ -244,7 +315,10 @@ export default function WebScreen({ showInfo }) {
       cfg.setInfo(info);
       const buf = await file.arrayBuffer();
       cfg.onBuffer?.(buf);
-      cfg.setWorkbook(XLSX.read(buf, { type: 'array' }));
+      // cellStyles+cellHTML solo importan para el master del catálogo (col
+      // C con marcas en negrita). Los otros dos no tienen rich text pero no
+      // pasa nada por pedirlo — es un no-op.
+      cfg.setWorkbook(XLSX.read(buf, { type: 'array', cellStyles: true, cellHTML: true }));
       showInfo?.({
         icon: 'check', tone: 'info',
         title: cfg.title,
