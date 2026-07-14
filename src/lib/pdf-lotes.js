@@ -362,11 +362,10 @@ export async function generateDescripcionPDF({
   y += 6;
 
   // ---------- LISTADO DE PRODUCTOS ----------
-  // Anchos: bullet, cifra uds, descripción
-  const bulletX = marginX;
-  const udsX    = marginX + 3;
+  // Sin bullet: solo nº de unidades + descripción.
+  const udsX    = marginX;
   const udsMaxW = 6;
-  const descX   = udsX + udsMaxW + 1.2;
+  const descX   = udsX + udsMaxW + 1.5;
   const descMaxW = W - marginX - descX;
   const bodyStartY = y;
   const bodyMaxY = H - 25; // deja espacio abajo para línea + pie legal
@@ -398,10 +397,8 @@ export async function generateDescripcionPDF({
     const p = productos[pi];
     const words = productWords[pi];
 
-    // Bullet gris + nº de unidades (fila de arranque)
+    // Nº de unidades (fila de arranque)
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...MUTED);
-    doc.text('•', bulletX, y);
     doc.setTextColor(...INK);
     doc.text(`${p.uds || 1}`, udsX, y);
 

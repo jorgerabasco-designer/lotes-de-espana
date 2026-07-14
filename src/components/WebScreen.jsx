@@ -106,22 +106,56 @@ function cellToRuns(cell) {
   return parseHtmlToRuns(html);
 }
 
-// Parser sencillo de HTML → runs bold/normal. Solo entiende <b> y <strong>
-// (que es lo que emite SheetJS para rich text). Descarta cualquier otro tag.
+// Parser tag-por-tag del HTML de una celda con rich text (cell.h de SheetJS).
+// Mantiene una pila de "estaba bold" por cada tag abierto, así al cerrar un
+// tag recupera el estado anterior — funciona con <b>, <strong>, y <span>
+// con font-weight:bold (o 600-900), aunque estén anidados o mezclados con
+// otros <span> normales que SheetJS mete para preservar el tamaño de fuente.
 function parseHtmlToRuns(html) {
   const runs = [];
-  // Normalizamos: <strong> → <b>, </strong> → </b>; quitamos <br> por espacio.
-  const norm = String(html)
-    .replace(/<br\s*\/?>/gi, ' ')
-    .replace(/<\/?strong[^>]*>/gi, (m) => m[1] === '/' ? '</b>' : '<b>')
-    .replace(/<span[^>]*font-weight\s*:\s*(?:bold|[6-9]00)[^>]*>/gi, '<b>')
-    .replace(/<\/span>/gi, '</b>');
-  const re = /<b[^>]*>([\s\S]*?)<\/b>|([^<]+)/gi;
-  let m;
-  while ((m = re.exec(norm))) {
-    if (m[1] != null) runs.push({ text: decodeEntities(m[1]).replace(/\s+/g, ' '), bold: true });
-    else if (m[2] != null) runs.push({ text: decodeEntities(m[2]).replace(/\s+/g, ' '), bold: false });
+  const stack = [];
+  let bold = false;
+  let buf = '';
+  const s = String(html);
+  let i = 0;
+  const flush = () => {
+    if (!buf) return;
+    runs.push({ text: decodeEntities(buf).replace(/\s+/g, ' '), bold });
+    buf = '';
+  };
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch !== '<') { buf += ch; i++; continue; }
+    // Tag encontrado
+    flush();
+    const end = s.indexOf('>', i);
+    if (end < 0) { i++; continue; }
+    const tag = s.slice(i + 1, end);
+    i = end + 1;
+    if (tag.startsWith('!') || tag.startsWith('?')) continue; // comment/doctype
+    const isClose = tag[0] === '/';
+    if (isClose) {
+      const prev = stack.pop();
+      if (prev !== undefined) bold = prev;
+    } else {
+      // Self-closing tag (ej. <br/>) → tratar como texto y no apilar
+      const selfClose = /\/\s*$/.test(tag);
+      const tagName = tag.split(/[\s/>]/)[0].toLowerCase();
+      if (!selfClose) stack.push(bold);
+      if (tagName === 'b' || tagName === 'strong') bold = true;
+      else if (tagName === 'span') {
+        if (/font-weight\s*:\s*(?:bold|[6-9]00)/i.test(tag)) bold = true;
+        // Sin font-weight: se mantiene el bold actual (no lo apagamos).
+      }
+      // Cualquier otro tag: mantiene el bold actual.
+      if (selfClose) {
+        // <br/> añade un espacio para que no se pegue el texto
+        if (tagName === 'br') buf += ' ';
+      }
+    }
   }
+  flush();
+
   // Compactar runs vacíos y consecutivos del mismo tipo.
   const out = [];
   for (const r of runs) {
