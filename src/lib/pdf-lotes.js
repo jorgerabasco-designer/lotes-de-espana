@@ -110,16 +110,23 @@ async function fetchLogoDataUrl() {
 //   · pdf-header.png         → CON logo (para el QR con precio)
 //   · pdf-header-nologo.png  → SIN logo (para el QR sin precio)
 // Cacheamos el data-url tras la 1ª carga de cada una para no re-decodificar.
+//
+// El "?v=<APP_LOAD_ID>" fuerza un cache-bust cada vez que se carga la app: si
+// actualizamos la imagen en public/, el próximo usuario que abra la web (sin
+// hard refresh) bajará la nueva versión sí o sí. Dentro de la misma sesión el
+// data-url se cachea en memoria, así que solo se baja una vez por carga.
+const APP_LOAD_ID = Date.now();
 const _headerCache = { 'con-precio': null, 'sin-precio': null };
 async function fetchHeaderBandRenderable(variant = 'con-precio') {
   if (_headerCache[variant] !== null) return _headerCache[variant] || null;
-  const file = variant === 'sin-precio' ? '/pdf-header-nologo.png' : '/pdf-header.png';
+  const path = variant === 'sin-precio' ? '/pdf-header-nologo.png' : '/pdf-header.png';
+  const file = `${path}?v=${APP_LOAD_ID}`;
   try {
     const r = await fetchAsRenderable(file);
     if (r) { _headerCache[variant] = r; return r; }
     // Fallback: si la variante "sin-logo" no existe todavía, cae a la normal.
     if (variant === 'sin-precio') {
-      const r2 = await fetchAsRenderable('/pdf-header.png');
+      const r2 = await fetchAsRenderable(`/pdf-header.png?v=${APP_LOAD_ID}`);
       _headerCache[variant] = r2 || false;
       return r2;
     }
