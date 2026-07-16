@@ -329,32 +329,29 @@ export async function generateDescripcionPDF({
     doc.text('lotesdeespana', W / 2, 18, { align: 'center' });
   }
 
-  let y = headerH + 8;
+  // Empezamos casi pegados a la banda decorativa — solo 2 mm de aire.
+  let y = headerH + 2;
 
   // ---------- FOTO DEL LOTE (respetando proporción original) ----------
-  // Reglas:
-  //   · Contain dentro de (maxW × maxH). Nunca distorsionar.
-  //   · Si el "contain" natural deja la foto demasiado estrecha (típico de
-  //     fotos verticales o cuadradas 700×800), forzamos un ancho mínimo y
-  //     dejamos crecer el alto — con un tope duro para no comernos el papel.
-  //   · Así el 802 (foto cuadrada) usa un tamaño parecido al 513 (horizontal).
+  // Todas las fotos son 700×800 (aspect 0.875, vertical suave). Ajustamos
+  // la caja para que en ese ratio ocupe cerca de 130×148 mm centrada.
+  //   · maxH normal = 105 mm (si algún día suben una horizontal 16:9, ~180×101)
+  //   · minW = 145 mm — para 700×800 se dispara este mínimo y crece el alto
+  //   · maxH_abs = 150 mm — tope duro por si viene algo muy vertical
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
       const maxW    = W - marginX * 2;   // ~180 mm de ancho útil
-      const maxH    = 95;                // caja "normal" (fotos horizontales)
-      const minW    = 130;               // ancho mínimo si la foto es cuadrada/vertical
-      const maxH_abs = 125;              // tope duro de alto (foto muy vertical)
+      const maxH    = 105;
+      const minW    = 145;
+      const maxH_abs = 150;
       const ratio = rendered.width / rendered.height;
 
       let drawW = maxW;
       let drawH = drawW / ratio;
       if (drawH > maxH) {
-        // Contain estándar
         drawH = maxH;
         drawW = drawH * ratio;
-        // Si al contener por alto la foto se hace demasiado estrecha,
-        // ampliamos ancho al mínimo (con cap absoluto de altura).
         if (drawW < minW) {
           drawW = minW;
           drawH = drawW / ratio;
@@ -367,7 +364,8 @@ export async function generateDescripcionPDF({
       const drawX = (W - drawW) / 2;
       try {
         doc.addImage(rendered.dataUrl, 'JPEG', drawX, y, drawW, drawH);
-        y += drawH + 6;
+        // Foto pegada al título (solo 1 mm de aire).
+        y += drawH + 1;
       } catch {}
     }
   }
