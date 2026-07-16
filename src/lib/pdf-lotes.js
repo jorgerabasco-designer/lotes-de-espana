@@ -330,33 +330,60 @@ export async function generateDescripcionPDF({
   }
 
   // Empezamos casi pegados a la banda decorativa — solo 2 mm de aire.
-  let y = headerH + 2;
+  const yAfterHeader = headerH + 2;
 
-  // ---------- FOTO DEL LOTE (respetando proporción original) ----------
-  // Todas las fotos son 700×800 (aspect 0.875, vertical suave). Ajustamos
-  // la caja para que en ese ratio ocupe cerca de 130×148 mm centrada.
-  //   · maxH normal = 105 mm (si algún día suben una horizontal 16:9, ~180×101)
-  //   · minW = 145 mm — para 700×800 se dispara este mínimo y crece el alto
-  //   · maxH_abs = 150 mm — tope duro por si viene algo muy vertical
+  // ---------- CONSTANTES DE LAYOUT ----------
+  const udsX     = marginX;
+  const udsMaxW  = 6;
+  const descX    = udsX + udsMaxW + 1.5;
+  const descMaxW = W - marginX - descX;
+  const TITLE_H  = 4;    // alto del título (nº ref + precio)
+  const LINE_GAP = 6;    // aire entre línea separadora y listado
+  const AFTER_PHOTO = 1; // aire entre foto y título
+  const FOOTER_RESERVE = 25; // reserva para línea + pie legal (bodyMaxY = H - 25)
+  const bodyMaxY = H - FOOTER_RESERVE;
+
+  // Rich text runs (para pintar bold parcial de las marcas)
+  const productWords = productos.map(p => runsToWords(p.runs, p.descripcion));
+
+  // ---------- PASO 1: cuánto ocupará el LISTADO con el font más pequeño ----------
+  // Estimo la altura mínima del listado (FS_MIN) para saber cuánto espacio
+  // sobra para la foto. Así garantizamos que el texto NUNCA invade el pie legal.
+  const FS_MAX = 10.5, FS_MIN = 6.5, FS_STEP = 0.25;
+  doc.setFontSize(FS_MIN);
+  const linesAtMin = productos.reduce(
+    (n, _, i) => n + countWrappedLines(doc, productWords[i], descMaxW), 0);
+  const listMinH = linesAtMin * FS_MIN * 0.48;
+
+  // ---------- PASO 2: tamaño máximo posible para la foto ----------
+  // Espacio disponible entre la cabecera y el bloque "título + separador + listado + footer".
+  const photoBudget = bodyMaxY - yAfterHeader - AFTER_PHOTO - TITLE_H - LINE_GAP - listMinH;
+  // Cap para lotes cortos (no queremos foto gigantesca ocupando media página).
+  const PHOTO_MAX_ABS = 150; // tope duro
+  const PHOTO_MIN     = 55;  // suelo (si el listado es larguísimo, foto pequeña)
+  const photoMaxH     = Math.max(PHOTO_MIN, Math.min(PHOTO_MAX_ABS, photoBudget));
+
+  let y = yAfterHeader;
+
+  // ---------- FOTO DEL LOTE (contain con maxH dinámico) ----------
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
-      const maxW    = W - marginX * 2;   // ~180 mm de ancho útil
-      const maxH    = 105;
-      const minW    = 145;
-      const maxH_abs = 150;
+      const maxW  = W - marginX * 2;
+      const minW  = 145;             // ancho mínimo si la foto sale muy estrecha
       const ratio = rendered.width / rendered.height;
 
       let drawW = maxW;
       let drawH = drawW / ratio;
-      if (drawH > maxH) {
-        drawH = maxH;
+      if (drawH > photoMaxH) {
+        drawH = photoMaxH;
         drawW = drawH * ratio;
-        if (drawW < minW) {
-          drawW = minW;
+        if (drawW < minW && drawH < PHOTO_MAX_ABS) {
+          // Intentamos ensanchar, pero sin pasarnos del budget.
+          drawW = Math.min(minW, maxW);
           drawH = drawW / ratio;
-          if (drawH > maxH_abs) {
-            drawH = maxH_abs;
+          if (drawH > photoMaxH) {
+            drawH = photoMaxH;
             drawW = drawH * ratio;
           }
         }
@@ -364,8 +391,7 @@ export async function generateDescripcionPDF({
       const drawX = (W - drawW) / 2;
       try {
         doc.addImage(rendered.dataUrl, 'JPEG', drawX, y, drawW, drawH);
-        // Foto pegada al título (solo 1 mm de aire).
-        y += drawH + 1;
+        y += drawH + AFTER_PHOTO;
       } catch {}
     }
   }
@@ -380,30 +406,19 @@ export async function generateDescripcionPDF({
     const precioStr = `${Number(precio).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€ + IVA`;
     doc.text(precioStr, W - marginX, y, { align: 'right' });
   }
-  y += 4;
+  y += TITLE_H;
 
   // Línea gruesa separadora
   doc.setDrawColor(...INK);
   doc.setLineWidth(0.8);
   doc.line(marginX, y, W - marginX, y);
   doc.setLineWidth(0.2);
-  y += 6;
+  y += LINE_GAP;
 
   // ---------- LISTADO DE PRODUCTOS ----------
-  // Sin bullet: solo nº de unidades + descripción.
-  const udsX    = marginX;
-  const udsMaxW = 6;
-  const descX   = udsX + udsMaxW + 1.5;
-  const descMaxW = W - marginX - descX;
   const bodyStartY = y;
-  const bodyMaxY = H - 25; // deja espacio abajo para línea + pie legal
-
-  // Cada producto trae `runs` desde el Excel (rich text bold parcial). Para el
-  // wrapping tokenizamos a nivel de palabra respetando el weight de cada palabra.
-  const productWords = productos.map(p => runsToWords(p.runs, p.descripcion));
 
   // Shrink-to-fit: probamos tamaños de letra hasta que todo quepa en 1 página.
-  const FS_MAX = 10.5, FS_MIN = 6.5, FS_STEP = 0.25;
   let chosenSize = FS_MIN;
   for (let fs = FS_MAX; fs >= FS_MIN - 0.001; fs -= FS_STEP) {
     doc.setFontSize(fs);
