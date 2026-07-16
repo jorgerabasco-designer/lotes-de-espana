@@ -329,8 +329,8 @@ export async function generateDescripcionPDF({
     doc.text('lotesdeespana', W / 2, 18, { align: 'center' });
   }
 
-  // Empezamos casi pegados a la banda decorativa — solo 2 mm de aire.
-  const yAfterHeader = headerH + 2;
+  // Empezamos pegados a la banda decorativa (1 mm sólo para respirar).
+  const yAfterHeader = headerH + 1;
 
   // ---------- CONSTANTES DE LAYOUT ----------
   const udsX     = marginX;
@@ -346,21 +346,24 @@ export async function generateDescripcionPDF({
   // Rich text runs (para pintar bold parcial de las marcas)
   const productWords = productos.map(p => runsToWords(p.runs, p.descripcion));
 
-  // ---------- PASO 1: cuánto ocupará el LISTADO con el font más pequeño ----------
-  // Estimo la altura mínima del listado (FS_MIN) para saber cuánto espacio
-  // sobra para la foto. Así garantizamos que el texto NUNCA invade el pie legal.
+  // Tamaños de fuente admitidos para el listado.
   const FS_MAX = 10.5, FS_MIN = 6.5, FS_STEP = 0.25;
-  doc.setFontSize(FS_MIN);
-  const linesAtMin = productos.reduce(
+
+  // ---------- PASO 1: altura ideal del listado a un font "objetivo" ----------
+  // El objetivo es que el texto salga a 8 pt (cómodo de leer). Con esa altura
+  // calculamos cuánto cabe para la foto. Si el lote es corto la foto se hace
+  // más grande (con un cap razonable); si es larguísimo el listado ganará el
+  // espacio y la foto se hará más pequeña — pero seguirá visible.
+  const FS_TARGET = 8;
+  doc.setFontSize(FS_TARGET);
+  const linesAtTarget = productos.reduce(
     (n, _, i) => n + countWrappedLines(doc, productWords[i], descMaxW), 0);
-  const listMinH = linesAtMin * FS_MIN * 0.48;
+  const listTargetH = linesAtTarget * FS_TARGET * 0.48;
 
   // ---------- PASO 2: tamaño máximo posible para la foto ----------
-  // Espacio disponible entre la cabecera y el bloque "título + separador + listado + footer".
-  const photoBudget = bodyMaxY - yAfterHeader - AFTER_PHOTO - TITLE_H - LINE_GAP - listMinH;
-  // Cap para lotes cortos (no queremos foto gigantesca ocupando media página).
-  const PHOTO_MAX_ABS = 150; // tope duro
-  const PHOTO_MIN     = 55;  // suelo (si el listado es larguísimo, foto pequeña)
+  const photoBudget = bodyMaxY - yAfterHeader - AFTER_PHOTO - TITLE_H - LINE_GAP - listTargetH;
+  const PHOTO_MAX_ABS = 115; // tope duro (foto "cómoda" para 700×800)
+  const PHOTO_MIN     = 55;  // suelo (para lotes larguísimos)
   const photoMaxH     = Math.max(PHOTO_MIN, Math.min(PHOTO_MAX_ABS, photoBudget));
 
   let y = yAfterHeader;
