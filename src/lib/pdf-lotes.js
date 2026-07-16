@@ -430,8 +430,8 @@ export async function generateDescripcionPDF({
   // La foto va rodeada de un margen respirable arriba y abajo. Como el
   // auto-trim quita el fondo propio de la foto, este aire lo pone el PDF
   // directamente para que el contenido no toque la cabecera ni el título.
-  const AIR_TOP    = 6;
-  const AIR_BOTTOM = 6;
+  const AIR_TOP    = 6;   // cabecera → foto (validado por Jorge, no tocar)
+  const AIR_BOTTOM = 10;  // foto → título (un poco más de aire que arriba)
   const yAfterHeader = headerH + AIR_TOP;
 
   // Rich text runs (para pintar bold parcial de las marcas)
