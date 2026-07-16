@@ -427,10 +427,12 @@ export async function generateDescripcionPDF({
   const LINE_GAP = 6;    // aire entre línea separadora y listado
   const FOOTER_RESERVE = 25; // reserva para línea + pie legal (bodyMaxY = H - 25)
   const bodyMaxY = H - FOOTER_RESERVE;
-  // Foto y texto pegados: 0 mm de aire entre cabecera→foto y foto→texto.
-  // La foto ya lleva su propio padding blanco alrededor que funciona como
-  // margen visual.
-  const yAfterHeader = headerH;
+  // Aire cabecera→foto y foto→título: 3 mm. Antes era 0 mm y quedaba
+  // demasiado pegado (con auto-trim del padding blanco/azul de la foto el
+  // contenido se quedaba tocando la cabecera y el título se solapaba).
+  const AIR_TOP    = 3;
+  const AIR_BOTTOM = 3;
+  const yAfterHeader = headerH + AIR_TOP;
 
   // Rich text runs (para pintar bold parcial de las marcas)
   const productWords = productos.map(p => runsToWords(p.runs, p.descripcion));
@@ -458,7 +460,7 @@ export async function generateDescripcionPDF({
       const drawX = (W - drawW) / 2;
       try {
         doc.addImage(trimmed.dataUrl, 'JPEG', drawX, y, drawW, drawH);
-        y += drawH; // pegada al título — 0 mm de aire
+        y += drawH + AIR_BOTTOM;
       } catch {}
     }
   }
