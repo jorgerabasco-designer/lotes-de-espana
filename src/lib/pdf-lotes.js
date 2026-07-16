@@ -329,9 +329,6 @@ export async function generateDescripcionPDF({
     doc.text('lotesdeespana', W / 2, 18, { align: 'center' });
   }
 
-  // Empezamos pegados a la banda decorativa (1 mm sólo para respirar).
-  const yAfterHeader = headerH + 1;
-
   // ---------- CONSTANTES DE LAYOUT ----------
   const udsX     = marginX;
   const udsMaxW  = 6;
@@ -339,62 +336,39 @@ export async function generateDescripcionPDF({
   const descMaxW = W - marginX - descX;
   const TITLE_H  = 4;    // alto del título (nº ref + precio)
   const LINE_GAP = 6;    // aire entre línea separadora y listado
-  const AFTER_PHOTO = 1; // aire entre foto y título
   const FOOTER_RESERVE = 25; // reserva para línea + pie legal (bodyMaxY = H - 25)
   const bodyMaxY = H - FOOTER_RESERVE;
+  // Foto y texto pegados: 0 mm de aire entre cabecera→foto y foto→texto.
+  // La foto ya lleva su propio padding blanco alrededor que funciona como
+  // margen visual.
+  const yAfterHeader = headerH;
 
   // Rich text runs (para pintar bold parcial de las marcas)
   const productWords = productos.map(p => runsToWords(p.runs, p.descripcion));
 
-  // Tamaños de fuente admitidos para el listado.
-  const FS_MAX = 10.5, FS_MIN = 6.5, FS_STEP = 0.25;
-
-  // ---------- PASO 1: altura ideal del listado a un font "objetivo" ----------
-  // El objetivo es que el texto salga a 8 pt (cómodo de leer). Con esa altura
-  // calculamos cuánto cabe para la foto. Si el lote es corto la foto se hace
-  // más grande (con un cap razonable); si es larguísimo el listado ganará el
-  // espacio y la foto se hará más pequeña — pero seguirá visible.
-  const FS_TARGET = 8;
-  doc.setFontSize(FS_TARGET);
-  const linesAtTarget = productos.reduce(
-    (n, _, i) => n + countWrappedLines(doc, productWords[i], descMaxW), 0);
-  const listTargetH = linesAtTarget * FS_TARGET * 0.48;
-
-  // ---------- PASO 2: tamaño máximo posible para la foto ----------
-  const photoBudget = bodyMaxY - yAfterHeader - AFTER_PHOTO - TITLE_H - LINE_GAP - listTargetH;
-  const PHOTO_MAX_ABS = 115; // tope duro (foto "cómoda" para 700×800)
-  const PHOTO_MIN     = 55;  // suelo (para lotes larguísimos)
-  const photoMaxH     = Math.max(PHOTO_MIN, Math.min(PHOTO_MAX_ABS, photoBudget));
+  // Tamaños de fuente admitidos para el listado (6.5 – 9 pt).
+  const FS_MAX = 9, FS_MIN = 6.5, FS_STEP = 0.25;
 
   let y = yAfterHeader;
 
-  // ---------- FOTO DEL LOTE (contain con maxH dinámico) ----------
+  // ---------- FOTO DEL LOTE (tamaño FIJO, siempre igual) ----------
+  // Alto fijo 115 mm. Con 700×800 (ratio 0.875) sale ~100 mm de ancho, que es
+  // proporcional y visualmente prominente. Si algún día suben una foto muy
+  // horizontal se capa el ancho al máximo útil.
+  const PHOTO_FIXED_H = 115;
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
       const maxW  = W - marginX * 2;
-      const minW  = 145;             // ancho mínimo si la foto sale muy estrecha
       const ratio = rendered.width / rendered.height;
 
-      let drawW = maxW;
-      let drawH = drawW / ratio;
-      if (drawH > photoMaxH) {
-        drawH = photoMaxH;
-        drawW = drawH * ratio;
-        if (drawW < minW && drawH < PHOTO_MAX_ABS) {
-          // Intentamos ensanchar, pero sin pasarnos del budget.
-          drawW = Math.min(minW, maxW);
-          drawH = drawW / ratio;
-          if (drawH > photoMaxH) {
-            drawH = photoMaxH;
-            drawW = drawH * ratio;
-          }
-        }
-      }
+      let drawH = PHOTO_FIXED_H;
+      let drawW = drawH * ratio;
+      if (drawW > maxW) { drawW = maxW; drawH = drawW / ratio; }
       const drawX = (W - drawW) / 2;
       try {
         doc.addImage(rendered.dataUrl, 'JPEG', drawX, y, drawW, drawH);
-        y += drawH + AFTER_PHOTO;
+        y += drawH; // pegada al título — 0 mm de aire
       } catch {}
     }
   }
