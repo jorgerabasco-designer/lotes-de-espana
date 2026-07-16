@@ -9,3 +9,4 @@ dist
 _design
 _reference
 .claude/settings.local.json
+HANDOFF.md
