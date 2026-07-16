@@ -427,11 +427,11 @@ export async function generateDescripcionPDF({
   const LINE_GAP = 6;    // aire entre línea separadora y listado
   const FOOTER_RESERVE = 25; // reserva para línea + pie legal (bodyMaxY = H - 25)
   const bodyMaxY = H - FOOTER_RESERVE;
-  // Aire cabecera→foto y foto→título: 3 mm. Antes era 0 mm y quedaba
-  // demasiado pegado (con auto-trim del padding blanco/azul de la foto el
-  // contenido se quedaba tocando la cabecera y el título se solapaba).
-  const AIR_TOP    = 3;
-  const AIR_BOTTOM = 3;
+  // La foto va rodeada de un margen respirable arriba y abajo. Como el
+  // auto-trim quita el fondo propio de la foto, este aire lo pone el PDF
+  // directamente para que el contenido no toque la cabecera ni el título.
+  const AIR_TOP    = 6;
+  const AIR_BOTTOM = 6;
   const yAfterHeader = headerH + AIR_TOP;
 
   // Rich text runs (para pintar bold parcial de las marcas)
@@ -443,10 +443,10 @@ export async function generateDescripcionPDF({
   let y = yAfterHeader;
 
   // ---------- FOTO DEL LOTE (tamaño FIJO, con auto-trim del padding) ----------
-  // Alto fijo 115 mm. Antes de pintar recortamos el padding uniforme que
-  // suele traer la foto (fondo azul, blanco, etc.) para que el contenido
-  // real quede pegado a la cabecera sin huecos "fantasma".
-  const PHOTO_FIXED_H = 115;
+  // Alto fijo 105 mm. Antes de pintar recortamos el padding uniforme que
+  // suele traer la foto (fondo azul, blanco, etc.) — así el contenido real
+  // queda enmarcado por el aire AIR_TOP/AIR_BOTTOM que pone el PDF.
+  const PHOTO_FIXED_H = 105;
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
