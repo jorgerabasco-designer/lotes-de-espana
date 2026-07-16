@@ -99,6 +99,95 @@ async function fetchLogoRenderable() {
     return r || null;
   } catch { return null; }
 }
+
+// Recorta el borde uniforme (padding blanco/azul/gris) de una foto para que
+// el contenido real quede pegado al borde. Detecta el color de las esquinas,
+// escanea filas y columnas y devuelve un nuevo data-url recortado.
+//
+// Si no hay padding relevante (menos del 3 % del alto/ancho), devuelve la foto
+// original sin tocar — así fotos ya recortadas no pierden un pelín por ruido.
+async function autoTrimPhoto(rendered) {
+  return await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const W = img.naturalWidth, H = img.naturalHeight;
+      const src = document.createElement('canvas');
+      src.width = W; src.height = H;
+      const sctx = src.getContext('2d');
+      sctx.drawImage(img, 0, 0);
+      const data = sctx.getImageData(0, 0, W, H).data;
+
+      // Color de referencia: media de las 4 esquinas (evita puntos raros).
+      const corner = (x, y) => {
+        const i = (y * W + x) * 4;
+        return [data[i], data[i + 1], data[i + 2]];
+      };
+      const corners = [corner(0, 0), corner(W - 1, 0), corner(0, H - 1), corner(W - 1, H - 1)];
+      const bg = [0, 1, 2].map(c => Math.round(corners.reduce((s, v) => s + v[c], 0) / corners.length));
+      const TOL = 22; // tolerancia por canal (0-255) para variación JPEG
+
+      const isBg = (i) =>
+        Math.abs(data[i]     - bg[0]) <= TOL &&
+        Math.abs(data[i + 1] - bg[1]) <= TOL &&
+        Math.abs(data[i + 2] - bg[2]) <= TOL;
+
+      // Se admite hasta un 1.5 % de píxeles NO-fondo en la fila/columna
+      // (motas, JPEG artifacts, etc.).
+      const rowThreshold = Math.max(3, Math.floor(W * 0.015));
+      const colThreshold = Math.max(3, Math.floor(H * 0.015));
+
+      let top = 0;
+      for (; top < H; top++) {
+        let n = 0;
+        for (let x = 0; x < W; x++) {
+          if (!isBg((top * W + x) * 4)) { n++; if (n > rowThreshold) break; }
+        }
+        if (n > rowThreshold) break;
+      }
+      let bottom = H - 1;
+      for (; bottom > top; bottom--) {
+        let n = 0;
+        for (let x = 0; x < W; x++) {
+          if (!isBg((bottom * W + x) * 4)) { n++; if (n > rowThreshold) break; }
+        }
+        if (n > rowThreshold) break;
+      }
+      let left = 0;
+      for (; left < W; left++) {
+        let n = 0;
+        for (let y = top; y <= bottom; y++) {
+          if (!isBg((y * W + left) * 4)) { n++; if (n > colThreshold) break; }
+        }
+        if (n > colThreshold) break;
+      }
+      let right = W - 1;
+      for (; right > left; right--) {
+        let n = 0;
+        for (let y = top; y <= bottom; y++) {
+          if (!isBg((y * W + right) * 4)) { n++; if (n > colThreshold) break; }
+        }
+        if (n > colThreshold) break;
+      }
+
+      const paddingRatio = ((top + (H - 1 - bottom)) / H + (left + (W - 1 - right)) / W) / 2;
+      if (paddingRatio < 0.03) {
+        // Padding despreciable → devolvemos la original tal cual.
+        resolve(rendered);
+        return;
+      }
+
+      const newW = right - left + 1;
+      const newH = bottom - top + 1;
+      const out = document.createElement('canvas');
+      out.width = newW; out.height = newH;
+      out.getContext('2d').drawImage(src, left, top, newW, newH, 0, 0, newW, newH);
+      const enc = encodeCanvas(out);
+      resolve({ type: 'image', dataUrl: enc.dataUrl, width: enc.width, height: enc.height });
+    };
+    img.onerror = () => resolve(rendered);
+    img.src = rendered.dataUrl;
+  });
+}
 // Compat: algunos callers viejos usaban solo el data-url.
 async function fetchLogoDataUrl() {
   const r = await fetchLogoRenderable();
@@ -351,23 +440,24 @@ export async function generateDescripcionPDF({
 
   let y = yAfterHeader;
 
-  // ---------- FOTO DEL LOTE (tamaño FIJO, siempre igual) ----------
-  // Alto fijo 115 mm. Con 700×800 (ratio 0.875) sale ~100 mm de ancho, que es
-  // proporcional y visualmente prominente. Si algún día suben una foto muy
-  // horizontal se capa el ancho al máximo útil.
+  // ---------- FOTO DEL LOTE (tamaño FIJO, con auto-trim del padding) ----------
+  // Alto fijo 115 mm. Antes de pintar recortamos el padding uniforme que
+  // suele traer la foto (fondo azul, blanco, etc.) para que el contenido
+  // real quede pegado a la cabecera sin huecos "fantasma".
   const PHOTO_FIXED_H = 115;
   if (loteFotoUrl) {
     const rendered = await fetchAsRenderable(loteFotoUrl);
     if (rendered) {
+      const trimmed = await autoTrimPhoto(rendered);
       const maxW  = W - marginX * 2;
-      const ratio = rendered.width / rendered.height;
+      const ratio = trimmed.width / trimmed.height;
 
       let drawH = PHOTO_FIXED_H;
       let drawW = drawH * ratio;
       if (drawW > maxW) { drawW = maxW; drawH = drawW / ratio; }
       const drawX = (W - drawW) / 2;
       try {
-        doc.addImage(rendered.dataUrl, 'JPEG', drawX, y, drawW, drawH);
+        doc.addImage(trimmed.dataUrl, 'JPEG', drawX, y, drawW, drawH);
         y += drawH; // pegada al título — 0 mm de aire
       } catch {}
     }
