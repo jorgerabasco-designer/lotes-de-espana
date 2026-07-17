@@ -68,12 +68,20 @@ function mapLegacyCat(cat) {
 
 export async function listProducts() {
   if (!SUPABASE_READY) return SEED_PRODUCTS;
-  const { data, error } = await supabase
-    .from('products')
-    .select('*')
-    .order('updated_at', { ascending: false });
-  if (error) throw error;
-  const products = (data || []).map(rowToProduct);
+  // Supabase limita cada consulta a 1000 filas: paginar hasta traerlo todo.
+  const PAGE = 1000;
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  const products = rows.map(rowToProduct);
 
   // Calcular 'used' dinámicamente: cuántas veces aparece cada SKU en los
   // bodegones guardados en el historial (estado='completed'). Más fiable
