@@ -391,27 +391,46 @@ export default function HistoryScreen({ products, history, activeGens = [], onRe
                   <div className="lb-desc">{lightbox.description}</div>
                 </>
               ) : null}
-              <div className="lb-section-h">Productos ({(lightbox.skus || []).length})</div>
-              <div className="lb-prods">
-                {(lightbox.skus || []).map(s => {
-                  const p = products.find(x => x.sku === s);
-                  if (!p) return (
-                    <div key={s} className="lb-prod">
-                      <div className="lb-prod-img"></div>
-                      <div className="lb-prod-info"><div className="lb-prod-n">{s}</div><div className="lb-prod-m">Producto eliminado</div></div>
+              {(() => {
+                // Listado completo: items con sku (catálogo) + extras sin sku
+                // (cajas/regalos que no están en la web). Compat con bodegones
+                // antiguos que solo tienen `skus`.
+                const list = (lightbox.items && lightbox.items.length)
+                  ? lightbox.items
+                  : (lightbox.skus || []).map(s => ({ sku: s, qty: 1 }));
+                return (
+                  <>
+                    <div className="lb-section-h">Productos ({list.length})</div>
+                    <div className="lb-prods">
+                      {list.map((it, i) => {
+                        if (!it.sku) return (
+                          <div key={`x${i}`} className="lb-prod">
+                            <div className="lb-prod-img lb-prod-img-empty">{I.upload({ size: 13 })}</div>
+                            <div className="lb-prod-info"><div className="lb-prod-n">{it.name || it.ref}</div><div className="lb-prod-m">No incluido en la foto</div></div>
+                          </div>
+                        );
+                        const p = products.find(x => x.sku === it.sku);
+                        if (!p) return (
+                          <div key={it.sku} className="lb-prod">
+                            <div className="lb-prod-img"></div>
+                            <div className="lb-prod-info"><div className="lb-prod-n">{it.sku}</div><div className="lb-prod-m">Producto eliminado</div></div>
+                          </div>
+                        );
+                        return (
+                          <div key={it.sku} className="lb-prod">
+                            <div className="lb-prod-img"><img src={p.img} alt=""/></div>
+                            <div className="lb-prod-info">
+                              <div className="lb-prod-n">{p.name}</div>
+                              <div className="lb-prod-m">{p.brand || p.sku}</div>
+                            </div>
+                            {(it.qty || 1) >= 2 && <div className="lb-prod-qty">×{it.qty}</div>}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                  return (
-                    <div key={s} className="lb-prod">
-                      <div className="lb-prod-img"><img src={p.img} alt=""/></div>
-                      <div className="lb-prod-info">
-                        <div className="lb-prod-n">{p.name}</div>
-                        <div className="lb-prod-m">{p.brand || p.sku}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                  </>
+                );
+              })()}
               <div className="lb-actions">
                 {onEdit && (
                   <button
@@ -509,7 +528,7 @@ export default function HistoryScreen({ products, history, activeGens = [], onRe
         .lb-stage-zoom:hover .lb-zoom-hint{opacity:1}
         .lb-stage .hthumb-comp{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding:48px 48px 60px}
         .lb-stage .hthumb-comp img{position:relative;max-width:24%;height:auto}
-        .lb-side{padding:36px 30px 24px;display:flex;flex-direction:column;background:var(--paper);overflow-y:auto}
+        .lb-side{padding:36px 30px 24px;display:flex;flex-direction:column;background:var(--paper);overflow-y:auto;max-height:92vh;min-height:0}
         .lb-eye{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:6px}
         .lb-title{font-family:'Fraunces',serif;font-size:24px;font-weight:500;color:var(--ink);letter-spacing:-.01em;line-height:1.15;display:inline-flex;align-items:center;gap:8px;border-radius:7px;padding:2px 6px;margin-left:-6px}
         .lb-title.editable{cursor:text}
@@ -527,8 +546,11 @@ export default function HistoryScreen({ products, history, activeGens = [], onRe
         .lb-prod{display:flex;gap:10px;padding:8px;background:#fff;border:1px solid var(--line);border-radius:9px;align-items:center}
         .lb-prod-img{width:38px;height:38px;border-radius:6px;background:#fff;border:1px solid var(--line);overflow:hidden;flex-shrink:0;padding:3px}
         .lb-prod-img img{width:100%;height:100%;object-fit:contain}
-        .lb-prod-n{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.2}
+        .lb-prod-img-empty{display:grid;place-items:center;color:var(--muted);background:var(--bg);border-style:dashed}
+        .lb-prod-info{min-width:0;flex:1}
+        .lb-prod-n{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .lb-prod-m{font-size:11px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+        .lb-prod-qty{flex-shrink:0;font-family:'Fraunces',serif;font-weight:600;font-size:13px;color:#fff;background:var(--accent);min-width:30px;height:24px;padding:0 8px;border-radius:99px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
         .lb-actions{display:flex;gap:6px;padding-top:16px;border-top:1px solid var(--line);margin-top:14px}
         .lb-actions .hbtn{flex:1;padding:10px 12px}
 

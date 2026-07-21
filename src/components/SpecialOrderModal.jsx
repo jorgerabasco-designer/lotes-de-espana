@@ -128,8 +128,17 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
 
   const handleConfirm = () => {
     if (!finalItems.length) return;
+    // Items sin coincidencia en el catálogo (cajas, regalos, estuches que no
+    // tenemos en la web). No van a la foto pero SÍ deben aparecer en el
+    // listado del PDF, así que los pasamos como "extras" (sin sku).
+    const extras = (resolved?.unmatched || []).map(u => ({
+      name: u.original.name || u.original.ref || 'Producto',
+      ref: u.original.ref || null,
+      qty: u.original.qty || 1,
+    }));
     onConfirm && onConfirm({
       items: finalItems,
+      extras,
       title: title || 'Pedido especial',
       description: description || '',
     });

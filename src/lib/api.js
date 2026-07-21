@@ -171,6 +171,12 @@ function normalizeProductos(raw) {
   return raw.map(it => {
     if (typeof it === 'string') return { sku: it, qty: 1 };
     if (it && typeof it === 'object' && it.sku) return { sku: it.sku, qty: Number(it.qty) || 1 };
+    // Item "extra" sin sku (caja/regalo que no está en el catálogo): se
+    // conserva por su nombre para que aparezca en el listado y el PDF, pero no
+    // va a la composición de la foto (no tiene foto).
+    if (it && typeof it === 'object' && it.name) {
+      return { sku: null, name: String(it.name), ref: it.ref || null, qty: Number(it.qty) || 1 };
+    }
     return null;
   }).filter(Boolean);
 }
@@ -182,8 +188,8 @@ function rowToBodegon(row) {
     n: row.numero,
     title: row.nombre || `Bodegón IA #${row.numero}`,
     description: row.descripcion || '',
-    items,                            // [{sku, qty}]
-    skus: items.map(it => it.sku),    // ['sku1','sku2'] — compat con HistoryScreen
+    items,                                          // [{sku, qty} | {sku:null, name, qty}]
+    skus: items.filter(it => it.sku).map(it => it.sku), // solo los que existen en catálogo
     image: row.imagen_path
       ? publicUrl('bodegones', row.imagen_path)
       : null,
@@ -444,7 +450,7 @@ async function nextBodegonNumber() {
 // items: [{ sku, qty }]. Se acepta también `skus` (array de strings) por
 // compatibilidad — se convierte a qty 1 cada uno.
 // `tags`: array de ids de etiquetas que aplicar al lote (sin gluten, vegano…).
-export async function startBodegonGeneration({ items, skus, title, description, tags }) {
+export async function startBodegonGeneration({ items, extras, skus, title, description, tags }) {
   if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
 
   let normItems = [];
@@ -454,6 +460,15 @@ export async function startBodegonGeneration({ items, skus, title, description, 
     normItems = skus.map(s => ({ sku: s, qty: 1 }));
   }
   if (normItems.length === 0) throw new Error('Selecciona al menos un producto.');
+
+  // Items "extra" sin sku (cajas, regalos, estuches que no están en el
+  // catálogo): se guardan por su nombre para que salgan en el listado y el
+  // PDF, pero NO se envían a la composición de la foto (la función de
+  // generación los ignora al no tener sku/foto).
+  const extraItems = (Array.isArray(extras) ? extras : [])
+    .filter(e => e && e.name)
+    .map(e => ({ sku: null, name: String(e.name), ref: e.ref || null, qty: Number(e.qty) || 1 }));
+  const productos = [...normItems, ...extraItems];
 
   const ref = newBodegonRef();
   const numero = await nextBodegonNumber();
@@ -465,7 +480,7 @@ export async function startBodegonGeneration({ items, skus, title, description, 
     numero,
     nombre: finalTitle,
     descripcion: description || null,
-    productos: normItems,            // [{sku, qty}]
+    productos,                       // [{sku, qty} | {sku:null, name, qty}]
     tags: finalTags,
     estado: 'generating',
   });
@@ -479,7 +494,7 @@ export async function startBodegonGeneration({ items, skus, title, description, 
     body: JSON.stringify({ ref }),
   }).catch(e => console.warn('Trigger background:', e));
 
-  return { id: ref, n: numero, title: finalTitle, description, tags: finalTags, items: normItems, skus: normItems.map(i => i.sku) };
+  return { id: ref, n: numero, title: finalTitle, description, tags: finalTags, items: productos, skus: normItems.map(i => i.sku) };
 }
 
 // Timeout 14 min: aprovechamos casi al límite los 15 min de la función

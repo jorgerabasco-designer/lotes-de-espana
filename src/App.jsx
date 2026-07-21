@@ -205,19 +205,25 @@ export default function App() {
   // Arranca una generación nueva. Se PERMITE tener varias en cola (multi-gen):
   // al lanzarla se añade a `activeGens` y se abre el overlay para verla. Si
   // ya hay otra abierta, se minimiza y la nueva pasa al primer plano.
-  const startBodegon = async ({ items, title, description, tags }) => {
+  const startBodegon = async ({ items, extras, title, description, tags }) => {
     if (!items || items.length < 2) return;
     ensureNotifPermission();
+    const extraItems = (extras || []).map(e => ({ name: e.name, ref: e.ref || null, qty: e.qty || 1 }));
     try {
       const created = await startBodegonGeneration({
-        items, title, description: description || '', tags: tags || [],
+        items, extras: extraItems, title, description: description || '', tags: tags || [],
       });
       const gen = {
         ref: created.id,
         title: created.title || title || `Bodegón IA #${bodegonNumber}`,
         description: description || '',
         tags: tags || [],
-        items: items.map(i => ({ sku: i.sku, qty: i.qty || 1 })),
+        // items = productos con foto (sku) + extras sin foto (name), para que el
+        // PDF y el listado los muestren todos.
+        items: [
+          ...items.map(i => ({ sku: i.sku, qty: i.qty || 1 })),
+          ...extraItems.map(e => ({ sku: null, name: e.name, ref: e.ref, qty: e.qty })),
+        ],
         status: 'generating',
         image: null,
         image_path: null,
@@ -269,11 +275,12 @@ export default function App() {
   }, [activeGens]);
 
   // Llamado desde SpecialOrderModal y BodegonEditOverlay → arranca la generación.
-  const handleSpecialOrderConfirm = ({ items, title, description, tags }) => {
+  const handleSpecialOrderConfirm = ({ items, extras, title, description, tags }) => {
     if (!items || !items.length) return;
     setSpecialOrderOpen(false);
     startBodegon({
       items,
+      extras: extras || [],
       title: title || `Bodegón IA #${bodegonNumber}`,
       description: description || '',
       tags: tags || [],

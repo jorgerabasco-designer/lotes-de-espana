@@ -301,7 +301,7 @@ export function resolveOrder(parsed, products) {
         });
       } else {
         unmatched.push({
-          original: { ref: it.ref, name: it.name || it.raw || '' },
+          original: { ref: it.ref, name: it.name || it.raw || '', qty: it.qty || 1 },
           reason: 'Referencia no encontrada en el catálogo.',
         });
       }
@@ -311,7 +311,7 @@ export function resolveOrder(parsed, products) {
     // Match por nombre
     const queryTokens = tokens(it.name);
     if (!queryTokens.length) {
-      unmatched.push({ original: { name: it.name }, reason: 'Nombre vacío o no descifrable.' });
+      unmatched.push({ original: { name: it.name, qty: it.qty || 1 }, reason: 'Nombre vacío o no descifrable.' });
       continue;
     }
 
@@ -338,7 +338,7 @@ export function resolveOrder(parsed, products) {
       });
     } else {
       unmatched.push({
-        original: { name: it.name },
+        original: { name: it.name, qty: it.qty || 1 },
         reason: 'Referencia no encontrada en el catálogo.',
       });
     }

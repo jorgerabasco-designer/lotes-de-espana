@@ -593,7 +593,7 @@ export async function generateBodegonPDF({ titulo, fotoUrl, productos, pieLegal 
   const descX    = udsX + udsMaxW + 1.5;
   const descMaxW = W - marginX - descX;
   const AIR_TOP    = 6;
-  const AIR_BOTTOM = 8;
+  const AIR_BOTTOM = 14;  // aire foto → título (más generoso para que respire)
   const TITLE_H  = 4;
   const LINE_GAP = 6;
 

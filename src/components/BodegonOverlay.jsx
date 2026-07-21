@@ -63,11 +63,13 @@ export default function BodegonOverlay({
     onUpdateMeta({ tags: next });
   };
 
-  const sel = items.map(it => products.find(p => p.sku === it.sku)).filter(Boolean);
+  const sel = items.map(it => it.sku && products.find(p => p.sku === it.sku)).filter(Boolean);
+  const extras = items.filter(it => !it.sku); // cajas/regalos sin foto (no van a la imagen)
   const sorted = [...sel].sort((a, b) => b.h - a.h);
   const maxH = Math.max(...sel.map(p => p.h), 30);
   const qtyOf = (sku) => items.find(it => it.sku === sku)?.qty || 1;
   const totalUnits = items.reduce((s, x) => s + (x.qty || 1), 0);
+  const totalLineas = sel.length + extras.length;
 
   const handleSave = async () => {
     if (!ready) return;
@@ -190,8 +192,8 @@ export default function BodegonOverlay({
             </h2>
           )}
           <div className="bo-meta">
-            {sel.length} {sel.length === 1 ? 'producto' : 'productos'}
-            {totalUnits > sel.length && ` · ${totalUnits} unidades`}
+            {totalLineas} {totalLineas === 1 ? 'producto' : 'productos'}
+            {totalUnits > totalLineas && ` · ${totalUnits} unidades`}
             {' · '}{new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
           </div>
 
@@ -223,7 +225,7 @@ export default function BodegonOverlay({
             </>
           )}
 
-          <div className="bo-section-h">Productos ({sel.length})</div>
+          <div className="bo-section-h">Productos ({totalLineas})</div>
           <div className="bo-prods">
             {sel.map(p => (
               <div key={p.sku} className="bo-prod">
@@ -233,6 +235,16 @@ export default function BodegonOverlay({
                   <div className="bo-prod-m">{p.brand}</div>
                 </div>
                 {qtyOf(p.sku) >= 2 && <div className="bo-prod-qty">×{qtyOf(p.sku)}</div>}
+              </div>
+            ))}
+            {extras.map((e, i) => (
+              <div key={`x${i}`} className="bo-prod">
+                <div className="bo-prod-img bo-prod-img-empty">{I.upload({ size: 13 })}</div>
+                <div className="bo-prod-info">
+                  <div className="bo-prod-n">{e.name}</div>
+                  <div className="bo-prod-m">No incluido en la foto</div>
+                </div>
+                {(e.qty || 1) >= 2 && <div className="bo-prod-qty">×{e.qty}</div>}
               </div>
             ))}
           </div>
@@ -276,7 +288,7 @@ export default function BodegonOverlay({
       <DownloadModal
         open={dlOpen}
         onClose={() => setDlOpen(false)}
-        bodegon={ready ? { id: activeGen.ref, title, description, skus: items.map(i => i.sku), image: activeGen.image, image_path: activeGen.image_path, created_at: new Date().toISOString() } : null}
+        bodegon={ready ? { id: activeGen.ref, title, description, items, skus: items.filter(i => i.sku).map(i => i.sku), image: activeGen.image, image_path: activeGen.image_path, created_at: new Date().toISOString() } : null}
         products={products}
       />
 
@@ -350,6 +362,7 @@ export default function BodegonOverlay({
         .bo-prod{display:flex;gap:10px;padding:8px 10px;background:#fff;border:1px solid var(--line);border-radius:9px;align-items:center}
         .bo-prod-img{width:36px;height:36px;border-radius:6px;background:#fff;border:1px solid var(--line);overflow:hidden;flex-shrink:0;padding:3px}
         .bo-prod-img img{width:100%;height:100%;object-fit:contain}
+        .bo-prod-img-empty{display:grid;place-items:center;color:var(--muted);background:var(--bg);border-style:dashed}
         .bo-prod-info{min-width:0;flex:1}
         .bo-prod-n{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .bo-prod-m{font-size:11px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}

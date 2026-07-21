@@ -5,7 +5,7 @@ import { generateBodegonPDF } from '../lib/pdf-lotes.js';
 
 // Pie legal del PDF del bodegón: aviso de imagen generada por IA.
 const PIE_LEGAL_BODEGON =
-  'Esta imagen ha sido generada por inteligencia artificial y puede contener errores de etiquetado, formato o tamaño. Lo más importante es el texto descriptivo del lote, donde especifica esa información, en caso de duda.';
+  'Esta imagen ha sido generada mediante inteligencia artificial y podría presentar imprecisiones en el etiquetado, el formato o el tamaño. Ante cualquier discrepancia, la descripción del lote es la referencia oficial y prevalece sobre la imagen.';
 
 const QUALITIES = [
   { id: 'media', label: 'Media', sub: 'Web, redes sociales', maxSide: 1280, quality: 0.78, kb: '~250 KB · 1280px' },
@@ -49,19 +49,19 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
     setBusy('pdf');
     setError(null);
     try {
-      // Cantidad por producto: la del bodegón (items [{sku, qty}]); si no, 1.
-      const qtyBySku = {};
-      for (const it of (bodegon.items || [])) qtyBySku[it.sku] = it.qty || 1;
-
-      // Listado en el orden del bodegón, resolviendo cada SKU contra el catálogo.
-      const productos = (bodegon.skus || []).map(sku => {
-        const p = (products || []).find(x => x.sku === sku);
-        return {
-          uds: qtyBySku[sku] || 1,
-          name: p?.name || sku,
-          brand: p?.brand || '',
-          sku,
-        };
+      // Listado del PDF: TODOS los items del bodegón, incluidos los "extras"
+      // sin sku (cajas, regalos, estuches que no están en el catálogo → no
+      // aparecen en la foto pero sí deben constar en el listado).
+      const itemList = (bodegon.items && bodegon.items.length)
+        ? bodegon.items
+        : (bodegon.skus || []).map(sku => ({ sku, qty: 1 }));
+      const productos = itemList.map(it => {
+        if (it.sku) {
+          const p = (products || []).find(x => x.sku === it.sku);
+          return { uds: it.qty || 1, name: p?.name || it.sku, brand: p?.brand || '', sku: it.sku };
+        }
+        // Extra sin sku: usamos el nombre guardado tal cual.
+        return { uds: it.qty || 1, name: it.name || it.ref || 'Producto', brand: '', sku: it.ref || '' };
       });
 
       const blob = await generateBodegonPDF({
