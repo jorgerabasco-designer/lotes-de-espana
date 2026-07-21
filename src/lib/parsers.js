@@ -70,11 +70,24 @@ function similarity(aTok, bTok) {
 // ============================================================================
 // EXCEL
 // ============================================================================
-// El Excel típico del cliente tiene esta forma:
-//   Fila 0:  [ "ALTADIA-1 ( PALETA IBÉRICA )", "Cantidad" ]
-//   Fila 1+: [ "<descripción del producto>", <cantidad numérica> ]
+// Los Excels del cliente llevan el código RP (formato 00XX000) en alguna
+// columna, pero el orden cambia según la plantilla. Dos formatos vistos:
+//   · "Datos":  A=Cant.  B=Componente(RP)  C=Concepto(descr.)
+//   · "Hoja1":  A=REF(RP) B=Descripción    C=Cantidad
 //
-// Devolvemos { title, items: [{ name, qty }] }
+// Por eso NO asumimos posiciones: detectamos automáticamente la columna de RP
+// (la que más celdas con formato 00XX000 tiene), la de cantidad y la de
+// descripción. Casamos por referencia exacta (fiable); si un Excel viniera sin
+// ninguna columna de RP, caemos al modo antiguo de coincidencia por nombre.
+//
+// El nombre del lote NO sale del Excel (sus cabeceras son etiquetas de columna,
+// no títulos): lo pone el modal a partir del nombre del fichero.
+//
+// Devolvemos { title:'', items: [{ ref?, name?, qty }] }
+const REF_CELL_RE = /^[0-9]{2}[A-Z]{2}[0-9]{3}$/;
+const HEADER_QTY  = /cantidad|cant|uds|unid|qty|umf/i;
+const HEADER_DESC = /desc|concepto|articul|art\b|componente|producto|nombre/i;
+
 export async function parseExcelOrder(file) {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
@@ -82,33 +95,92 @@ export async function parseExcelOrder(file) {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
 
   if (!rows.length) throw new Error('El Excel está vacío.');
+  const maxCols = rows.reduce((m, r) => Math.max(m, r ? r.length : 0), 0);
 
-  // Detección de título: primera celda no vacía de la fila 0. Si la palabra
-  // 'cantidad' aparece, asumimos que la fila 0 es cabecera y el título está
-  // en la celda izquierda. Si no, igualmente usamos la celda [0][0] como título.
-  const header = rows[0];
-  let title = header && header[0] ? String(header[0]).trim() : '';
-  // Si la celda parece ser un nombre de producto y no un título de lote, no
-  // forzamos nada; el usuario podrá editar el título antes de generar.
-  const startRow = header && /cantidad|cant\b|qty|unidades/i.test(String(header[1] || ''))
-    ? 1
-    : 0;
-
-  const items = [];
-  for (let i = startRow; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r) continue;
-    const name = r[0] ? String(r[0]).trim() : '';
-    if (!name) continue;
-    // Algunas filas pueden ser cabeceras intermedias / totales: si el nombre
-    // coincide con el título, lo saltamos.
-    if (i === 0 && name === title) continue;
-    const qtyRaw = r[1];
-    const qty = Math.max(1, Math.round(Number(qtyRaw) || 1));
-    items.push({ name, qty });
+  // 1. Columna de referencias RP: la que más celdas con formato 00XX000 tenga.
+  let refCol = -1, refHits = 0;
+  for (let c = 0; c < maxCols; c++) {
+    let hits = 0;
+    for (const r of rows) {
+      const v = r && r[c] != null ? String(r[c]).trim().toUpperCase() : '';
+      if (REF_CELL_RE.test(v)) hits++;
+    }
+    if (hits > refHits) { refHits = hits; refCol = c; }
   }
 
-  return { title, items };
+  // Sin columna de RP → modo antiguo: col A = nombre, col B = cantidad.
+  if (refCol < 0 || refHits === 0) {
+    const items = [];
+    const start = /cantidad|cant\b|qty|unidades/i.test(String(rows[0]?.[1] || '')) ? 1 : 0;
+    for (let i = start; i < rows.length; i++) {
+      const name = rows[i]?.[0] ? String(rows[i][0]).trim() : '';
+      if (!name) continue;
+      const qty = Math.max(1, Math.round(Number(rows[i][1]) || 1));
+      items.push({ name, qty });
+    }
+    return { title: '', items };
+  }
+
+  // 2. Fila de cabecera: primera fila cuyo refCol NO es una RP (son etiquetas).
+  let headerRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const v = rows[i]?.[refCol] != null ? String(rows[i][refCol]).trim().toUpperCase() : '';
+    if (!REF_CELL_RE.test(v) && rows[i]?.some(c => c != null && String(c).trim())) { headerRow = i; break; }
+  }
+  const hdr = headerRow >= 0 ? rows[headerRow].map(c => String(c ?? '')) : [];
+
+  // 3. Columna de cantidad: por etiqueta de cabecera; si no, la de enteros pequeños.
+  let qtyCol = -1;
+  for (let c = 0; c < maxCols; c++) {
+    if (c !== refCol && HEADER_QTY.test(hdr[c] || '')) { qtyCol = c; break; }
+  }
+  if (qtyCol < 0) {
+    let bestInt = 0;
+    for (let c = 0; c < maxCols; c++) {
+      if (c === refCol) continue;
+      let ints = 0;
+      for (let i = 0; i < rows.length; i++) {
+        if (i === headerRow) continue;
+        const n = Number(rows[i]?.[c]);
+        if (Number.isInteger(n) && n >= 1 && n <= 99) ints++;
+      }
+      if (ints > bestInt) { bestInt = ints; qtyCol = c; }
+    }
+  }
+
+  // 4. Columna de descripción: por etiqueta; si no, la de texto más largo restante.
+  let descCol = -1;
+  for (let c = 0; c < maxCols; c++) {
+    if (c !== refCol && c !== qtyCol && HEADER_DESC.test(hdr[c] || '')) { descCol = c; break; }
+  }
+  if (descCol < 0) {
+    let bestLen = 0;
+    for (let c = 0; c < maxCols; c++) {
+      if (c === refCol || c === qtyCol) continue;
+      let len = 0, n = 0;
+      for (let i = 0; i < rows.length; i++) {
+        if (i === headerRow) continue;
+        const s = rows[i]?.[c] != null ? String(rows[i][c]).trim() : '';
+        if (s) { len += s.length; n++; }
+      }
+      const avg = n ? len / n : 0;
+      if (avg > bestLen) { bestLen = avg; descCol = c; }
+    }
+  }
+
+  const items = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (i === headerRow) continue;
+    const r = rows[i];
+    if (!r) continue;
+    const refVal = r[refCol] != null ? String(r[refCol]).trim().toUpperCase() : '';
+    const name = descCol >= 0 && r[descCol] != null ? String(r[descCol]).trim() : '';
+    const qty = Math.max(1, Math.round(Number(qtyCol >= 0 ? r[qtyCol] : 1) || 1));
+    if (REF_CELL_RE.test(refVal)) items.push({ ref: refVal, qty, name });
+    else if (name) items.push({ qty, name }); // fila sin RP (caja/estuche): reserva por nombre
+  }
+
+  return { title: '', items };
 }
 
 // ============================================================================
@@ -229,7 +301,7 @@ export function resolveOrder(parsed, products) {
         });
       } else {
         unmatched.push({
-          original: { ref: it.ref, name: it.raw || '' },
+          original: { ref: it.ref, name: it.name || it.raw || '' },
           reason: 'Referencia no encontrada en el catálogo.',
         });
       }
