@@ -544,6 +544,183 @@ export async function generateDescripcionPDF({
   return doc.output('blob');
 }
 
+// ---------- PDF de BODEGÓN (Composición IA) ----------
+//
+// Replica el formato de los PDFs de la sección Web, pero para un bodegón
+// generado con IA:
+//   · Banda decorativa CON logo (misma que el QR con precio).
+//   · Foto del bodegón (auto-trim del fondo blanco), tamaño adaptativo según
+//     cuántos productos haya (menos productos → foto más grande).
+//   · Nombre del bodegón (título, negrita).
+//   · Listado 1 línea por producto: "N descripción con la MARCA en negrita",
+//     minúsculas salvo la marca (en MAYÚSCULA y bold). Shrink-to-fit a 1 página.
+//   · Pie legal: aviso de imagen generada por IA.
+//
+// Parámetros:
+//   titulo:    nombre del bodegón
+//   fotoUrl:   URL de la imagen del bodegón
+//   productos: [{ uds, name, brand, sku }]
+//   pieLegal:  texto del pie
+export async function generateBodegonPDF({ titulo, fotoUrl, productos, pieLegal = '' }) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
+  const W = 210, H = 297;
+  const marginX = 15;
+
+  const INK   = [45, 42, 38];
+  const MUTED = [120, 115, 105];
+  const GREEN = [64, 116, 66];
+
+  // ---------- BANDA DECORATIVA CON LOGO ----------
+  const band = await fetchHeaderBandRenderable('con-precio');
+  let headerH = 28;
+  if (band) {
+    const ratio = band.width / band.height;
+    headerH = W / ratio;
+    try { doc.addImage(band.dataUrl, 'JPEG', 0, 0, W, headerH); }
+    catch { headerH = 28; }
+  } else {
+    doc.setFillColor(...GREEN);
+    doc.rect(0, 0, W, 28, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(255, 255, 255);
+    doc.text('lotesdeespana', W / 2, 18, { align: 'center' });
+  }
+
+  // ---------- LAYOUT ----------
+  const udsX     = marginX;
+  const udsMaxW  = 6;
+  const descX    = udsX + udsMaxW + 1.5;
+  const descMaxW = W - marginX - descX;
+  const AIR_TOP    = 6;
+  const AIR_BOTTOM = 8;
+  const TITLE_H  = 4;
+  const LINE_GAP = 6;
+
+  // Reserva del pie legal (según nº de líneas que ocupe el aviso).
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(8);
+  const pieLines = pieLegal ? doc.splitTextToSize(pieLegal, W - marginX * 2) : [];
+  const FOOTER_RESERVE = pieLegal ? 12 + pieLines.length * 3.4 : 14;
+  const bodyMaxY = H - FOOTER_RESERVE;
+
+  let y = headerH + AIR_TOP;
+
+  // ---------- FOTO DEL BODEGÓN ----------
+  // Alto adaptativo: con listas largas la foto se reduce para que todo quepa.
+  const n = productos.length;
+  const PHOTO_H = n <= 12 ? 105 : n <= 20 ? 92 : n <= 30 ? 78 : 66;
+  if (fotoUrl) {
+    const rendered = await fetchAsRenderable(fotoUrl);
+    if (rendered) {
+      const trimmed = await autoTrimPhoto(rendered);
+      const maxW  = W - marginX * 2;
+      const ratio = trimmed.width / trimmed.height;
+      let drawH = PHOTO_H;
+      let drawW = drawH * ratio;
+      if (drawW > maxW) { drawW = maxW; drawH = drawW / ratio; }
+      const drawX = (W - drawW) / 2;
+      try {
+        doc.addImage(trimmed.dataUrl, 'JPEG', drawX, y, drawW, drawH);
+        y += drawH + AIR_BOTTOM;
+      } catch {}
+    }
+  }
+
+  // ---------- TÍTULO (nombre del bodegón) ----------
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(19);
+  doc.setTextColor(...INK);
+  const tituloUp = String(titulo || 'Bodegón').toUpperCase();
+  const tituloLines = doc.splitTextToSize(tituloUp, W - marginX * 2);
+  doc.text(tituloLines[0], marginX, y);
+  y += TITLE_H;
+
+  // Línea gruesa separadora
+  doc.setDrawColor(...INK);
+  doc.setLineWidth(0.8);
+  doc.line(marginX, y, W - marginX, y);
+  doc.setLineWidth(0.2);
+  y += LINE_GAP;
+
+  // ---------- LISTADO DE PRODUCTOS ----------
+  const bodyStartY = y;
+  const productWords = productos.map(p => runsToWords(nameBrandRuns(p.name, p.brand), p.name));
+
+  const FS_MAX = 9, FS_MIN = 6.5, FS_STEP = 0.25;
+  let chosenSize = FS_MIN;
+  for (let fs = FS_MAX; fs >= FS_MIN - 0.001; fs -= FS_STEP) {
+    doc.setFontSize(fs);
+    const lineH = fs * 0.48;
+    let totalLines = 0;
+    for (const words of productWords) totalLines += countWrappedLines(doc, words, descMaxW);
+    if (bodyStartY + totalLines * lineH <= bodyMaxY) { chosenSize = fs; break; }
+    chosenSize = fs;
+  }
+  const lineH = chosenSize * 0.48;
+  doc.setFontSize(chosenSize);
+
+  for (let pi = 0; pi < productos.length; pi++) {
+    const p = productos[pi];
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...INK);
+    doc.text(`${p.uds || 1}`, udsX, y);
+    y = renderWordsWrapped(doc, productWords[pi], descX, y, descMaxW, lineH);
+  }
+
+  // Línea gruesa antes del pie
+  y += 2;
+  doc.setDrawColor(...INK);
+  doc.setLineWidth(0.8);
+  doc.line(marginX, y, W - marginX, y);
+  doc.setLineWidth(0.2);
+
+  // ---------- PIE LEGAL (aviso IA, cursiva pequeña, centrado) ----------
+  if (pieLegal) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.setTextColor(...MUTED);
+    let py = H - 10 - (pieLines.length - 1) * 3.2;
+    for (const line of pieLines) {
+      doc.text(line, W / 2, py, { align: 'center' });
+      py += 3.2;
+    }
+  }
+
+  return doc.output('blob');
+}
+
+// Construye los runs [{text, bold}] de la descripción de un producto del
+// catálogo: la marca (si se encuentra en el nombre) va en MAYÚSCULA y negrita,
+// el resto en su caja original y normal. Si no se localiza la marca exacta,
+// se resaltan las secuencias de MAYÚSCULAS (probables marcas) como reserva.
+function nameBrandRuns(name, brand) {
+  const nm = String(name || '').trim();
+  const br = String(brand || '').trim();
+  if (!nm) return [{ text: '', bold: false }];
+  if (br) {
+    const i = nm.toLowerCase().indexOf(br.toLowerCase());
+    if (i >= 0) {
+      const runs = [];
+      if (i > 0) runs.push({ text: nm.slice(0, i), bold: false });
+      runs.push({ text: nm.slice(i, i + br.length).toUpperCase(), bold: true });
+      if (i + br.length < nm.length) runs.push({ text: nm.slice(i + br.length), bold: false });
+      return runs;
+    }
+  }
+  // Reserva: resaltar secuencias de MAYÚSCULAS (≥2 letras) como marca.
+  const re = /([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*)*)/g;
+  const runs = []; let cursor = 0, m;
+  while ((m = re.exec(nm))) {
+    if ((m[0].match(/[A-ZÁÉÍÓÚÜÑ]/g) || []).length < 2) continue;
+    if (m.index > cursor) runs.push({ text: nm.slice(cursor, m.index), bold: false });
+    runs.push({ text: m[0], bold: true });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < nm.length) runs.push({ text: nm.slice(cursor), bold: false });
+  return runs.length ? runs : [{ text: nm, bold: false }];
+}
+
 // Pinta una línea de texto alternando entre 'normal' y 'bold' según detecte
 // secuencias de MAYÚSCULAS (marcas comerciales). Respeta la fuente y tamaño
 // que ya estén activos en el documento; solo cambia el weight.

@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { I } from './icons.jsx';
 import { downloadImageWithQuality } from '../lib/download.js';
+import { generateBodegonPDF } from '../lib/pdf-lotes.js';
+
+// Pie legal del PDF del bodegón: aviso de imagen generada por IA.
+const PIE_LEGAL_BODEGON =
+  'Esta imagen ha sido generada por inteligencia artificial y puede contener errores de etiquetado, formato o tamaño. Lo más importante es el texto descriptivo del lote, donde especifica esa información, en caso de duda.';
 
 const QUALITIES = [
   { id: 'media', label: 'Media', sub: 'Web, redes sociales', maxSide: 1280, quality: 0.78, kb: '~250 KB · 1280px' },
@@ -44,173 +49,36 @@ export default function DownloadModal({ open, onClose, bodegon, products }) {
     setBusy('pdf');
     setError(null);
     try {
-      const { jsPDF } = await import('jspdf');
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
-      const margin = 18;
+      // Cantidad por producto: la del bodegón (items [{sku, qty}]); si no, 1.
+      const qtyBySku = {};
+      for (const it of (bodegon.items || [])) qtyBySku[it.sku] = it.qty || 1;
 
-      // ---- Paleta ----
-      const ink = [45, 42, 38];
-      const ink2 = [91, 85, 76];
-      const muted = [139, 131, 117];
-      const accent = [167, 77, 74];
-      const olive = [47, 74, 61];
-      const line = [230, 222, 210];
-
-      // ---- Cabecera (banda fina sin logo, solo texto identificativo) ----
-      const bandH = 22;
-      doc.setFillColor(245, 241, 232);
-      doc.rect(0, 0, pageW, bandH, 'F');
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.setTextColor(...ink);
-      doc.text('LOTES DE ESPAÑA', margin, 12);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor(...muted);
-      doc.text('Studio · Composición personalizada', margin, 17);
-
-      const dateStr = bodegon.created_at
-        ? new Date(bodegon.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })
-        : new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
-      doc.setFontSize(7.5);
-      doc.setTextColor(...muted);
-      doc.text(dateStr.toUpperCase(), pageW - margin, 12, { align: 'right' });
-      doc.setFontSize(8.5);
-      doc.setTextColor(...ink2);
-      doc.text(`${(bodegon.skus || []).length} productos`, pageW - margin, 17, { align: 'right' });
-
-      // Línea separadora bajo cabecera
-      doc.setDrawColor(...line);
-      doc.setLineWidth(0.3);
-      doc.line(margin, bandH, pageW - margin, bandH);
-
-      // ---- Título del bodegón (sin logo, pendiente de SVG en alta resolución) ----
-      const titleSize = 28; // pt
-      const titleLineH = 11; // mm
-      let cursorY = bandH + 18 + (titleSize * 0.353);
-      doc.setFont('times', 'normal');
-      doc.setFontSize(titleSize);
-      doc.setTextColor(...ink);
-      const title = bodegon.title || 'Bodegón';
-      const titleLines = doc.splitTextToSize(title, pageW - margin * 2);
-      doc.text(titleLines, margin, cursorY, { baseline: 'alphabetic' });
-      cursorY += (titleLines.length - 1) * titleLineH + 12;
-
-      // ---- Imagen del bodegón (sin marco, alineada a margen izquierdo) ----
-      const res = await fetch(bodegon.image, { mode: 'cors' });
-      const blob = await res.blob();
-      const dataUrl = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result);
-        r.onerror = reject;
-        r.readAsDataURL(blob);
-      });
-      const bitmap = await createImageBitmap(blob);
-      const imgRatio = bitmap.width / bitmap.height;
-      const maxImgW = pageW - margin * 2;
-      const maxImgH = 110;
-      let imgW = maxImgW;
-      let imgH = imgW / imgRatio;
-      if (imgH > maxImgH) {
-        imgH = maxImgH;
-        imgW = imgH * imgRatio;
-      }
-      const imgX = (pageW - imgW) / 2; // centrada horizontalmente bajo el título
-
-      doc.addImage(dataUrl, 'JPEG', imgX, cursorY, imgW, imgH, undefined, 'FAST');
-      cursorY += imgH + 16;
-
-      // ---- Descripción ----
-      if (bodegon.description) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(...muted);
-        doc.text('DESCRIPCIÓN', margin, cursorY, { baseline: 'alphabetic' });
-        cursorY += 7;
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10.5);
-        doc.setTextColor(...ink2);
-        const descLines = doc.splitTextToSize(bodegon.description, pageW - margin * 2);
-        doc.text(descLines, margin, cursorY, { baseline: 'alphabetic', lineHeightFactor: 1.45 });
-        cursorY += descLines.length * 5.4 + 10;
-      }
-
-      // ---- Productos ----
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(...muted);
-      doc.text(`PRODUCTOS INCLUIDOS · ${(bodegon.skus || []).length}`, margin, cursorY, { baseline: 'alphabetic' });
-      cursorY += 8;
-
-      const skuList = bodegon.skus || [];
-      doc.setLineWidth(0.2);
-      doc.setDrawColor(...line);
-
-      // Layout de fila de producto:
-      //   bullet   |   nombre / marca         |     ref. (derecha)
-      //   2mm      |   resto del ancho        |
-      const bulletX = margin + 1.4;
-      const textX = margin + 6;
-      const rowH = 15;       // alto reservado por fila (más aire entre productos)
-      const nameBaseline = 5;   // mm desde el top de la fila al baseline del nombre
-      const brandBaseline = 9.6; // mm desde el top de la fila al baseline de marca
-
-      for (const sku of skuList) {
+      // Listado en el orden del bodegón, resolviendo cada SKU contra el catálogo.
+      const productos = (bodegon.skus || []).map(sku => {
         const p = (products || []).find(x => x.sku === sku);
-        if (cursorY + rowH > pageH - 16) {
-          doc.addPage();
-          cursorY = margin;
-        }
-        if (p) {
-          // Bullet alineado con el baseline visual del nombre (cap height ~ 2.6 mm para 11pt)
-          doc.setFillColor(...olive);
-          doc.circle(bulletX, cursorY + nameBaseline - 1.3, 0.9, 'F');
+        return {
+          uds: qtyBySku[sku] || 1,
+          name: p?.name || sku,
+          brand: p?.brand || '',
+          sku,
+        };
+      });
 
-          // Nombre
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(11);
-          doc.setTextColor(...ink);
-          doc.text(p.name, textX, cursorY + nameBaseline, { baseline: 'alphabetic' });
+      const blob = await generateBodegonPDF({
+        titulo: bodegon.title || 'Bodegón',
+        fotoUrl: bodegon.image,
+        productos,
+        pieLegal: PIE_LEGAL_BODEGON,
+      });
 
-          // Ref alineada al baseline del nombre
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          doc.setTextColor(...muted);
-          doc.text(`Ref. ${p.sku}`, pageW - margin, cursorY + nameBaseline, { baseline: 'alphabetic', align: 'right' });
-
-          // Marca
-          doc.setFontSize(9);
-          doc.setTextColor(...muted);
-          doc.text(p.brand, textX, cursorY + brandBaseline, { baseline: 'alphabetic' });
-
-          // Línea separadora
-          doc.line(textX, cursorY + rowH, pageW - margin, cursorY + rowH);
-          cursorY += rowH;
-        } else {
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(10);
-          doc.setTextColor(...ink2);
-          doc.text(`• ${sku}`, margin, cursorY + 4, { baseline: 'alphabetic' });
-          cursorY += 7;
-        }
-      }
-
-      // ---- Pie ----
-      const footY = pageH - 12;
-      doc.setDrawColor(...line);
-      doc.setLineWidth(0.3);
-      doc.line(margin, footY - 4, pageW - margin, footY - 4);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
-      doc.setTextColor(...muted);
-      doc.text('lotesdeespana.es', margin, footY);
-      doc.text(`Página 1`, pageW - margin, footY, { align: 'right' });
-
-      doc.save(`${safeName}.pdf`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       setTimeout(onClose, 400);
     } catch (e) {
       setError(e.message || 'Error generando el PDF.');
