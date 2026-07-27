@@ -199,6 +199,8 @@ function rowToBodegon(row) {
     generation_seconds: row.generation_seconds ?? null,
     modelo_usado: row.modelo_usado || null,
     created_at: row.created_at,
+    layout: row.layout || null,              // maqueta editada a mano
+    instrucciones: row.instrucciones || '',  // correcciones del usuario
   };
 }
 
@@ -263,9 +265,12 @@ export async function discardBodegon(ref) {
     .select('imagen_path')
     .eq('ref', ref)
     .maybeSingle();
-  if (row?.imagen_path) {
-    await supabase.storage.from('bodegones').remove([row.imagen_path]).catch(() => {});
-  }
+  // Se borran también la maqueta y la hoja de contactos: al regenerar varias
+  // veces se acumularían en Storage. Los nombres son fijos por ref, así que no
+  // hace falta leerlos de la fila (que puede no tener aún esas columnas).
+  const basura = [`${ref}_blueprint.jpg`, `${ref}_sheet.jpg`];
+  if (row?.imagen_path) basura.push(row.imagen_path);
+  await supabase.storage.from('bodegones').remove(basura).catch(() => {});
   await supabase.from('bodegones').delete().eq('ref', ref);
   return true;
 }
@@ -437,6 +442,50 @@ function newBodegonRef() {
   return `${d2()}${a2()}${d3()}`;
 }
 
+// Prepara las dos imágenes de referencia del bodegón y las sube a Storage.
+// Devuelve { layout, blueprint_path, contactsheet_path } — con nulls si no se
+// ha podido montar (nunca lanza: la generación debe seguir adelante igual).
+async function buildBodegonAssets({ ref, normItems, layout, products }) {
+  const out = { layout: layout || null, blueprint_path: null, contactsheet_path: null };
+  try {
+    const catalog = products || [];
+    if (!catalog.length) return out;
+    const bySku = new Map(catalog.map(p => [p.sku, p]));
+    const entries = normItems
+      .map(it => ({ product: bySku.get(it.sku), qty: it.qty }))
+      .filter(e => e.product?.img);
+    if (!entries.length) return out;
+
+    const { autoLayout, renderBlueprint, renderContactSheet, loadMetrics } = await import('./composer.js');
+    const metrics = await loadMetrics(entries.map(e => e.product));
+    const finalLayout = layout?.items?.length ? layout : autoLayout(entries, metrics);
+    out.layout = finalLayout;
+
+    const uniques = [...new Map(entries.map(e => [e.product.sku, e.product])).values()];
+    const [bp, sheet] = await Promise.all([
+      renderBlueprint(finalLayout, catalog),
+      renderContactSheet(uniques),
+    ]);
+
+    if (bp) out.blueprint_path = await uploadBodegonAsset(bp, `${ref}_blueprint.jpg`);
+    if (sheet) out.contactsheet_path = await uploadBodegonAsset(sheet, `${ref}_sheet.jpg`);
+  } catch (e) {
+    console.warn('[bodegón] No se pudo preparar la maqueta:', e);
+  }
+  return out;
+}
+
+async function uploadBodegonAsset(blob, path) {
+  const { error } = await supabase.storage
+    .from('bodegones')
+    .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+  if (error) {
+    console.warn('[bodegón] Error subiendo', path, error.message);
+    return null;
+  }
+  return path;
+}
+
 async function nextBodegonNumber() {
   if (!SUPABASE_READY) return 1;
   const { data } = await supabase
@@ -450,7 +499,10 @@ async function nextBodegonNumber() {
 // items: [{ sku, qty }]. Se acepta también `skus` (array de strings) por
 // compatibilidad — se convierte a qty 1 cada uno.
 // `tags`: array de ids de etiquetas que aplicar al lote (sin gluten, vegano…).
-export async function startBodegonGeneration({ items, extras, skus, title, description, tags }) {
+export async function startBodegonGeneration({
+  items, extras, skus, title, description, tags,
+  layout = null, instrucciones = '', layoutEditado = false, products = null,
+}) {
   if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
 
   let normItems = [];
@@ -475,7 +527,13 @@ export async function startBodegonGeneration({ items, extras, skus, title, descr
   const finalTitle = title || `Bodegón IA #${numero}`;
   const finalTags = Array.isArray(tags) ? tags : [];
 
-  const { error: insErr } = await supabase.from('bodegones').insert({
+  // Maqueta + hoja de contactos. Colapsan las N fotos de producto en 2
+  // imágenes: Gemini solo sostiene ~6 referencias en alta fidelidad, y por
+  // encima de eso empieza a inventar etiquetas y a equivocarse de tamaños.
+  // Si algo falla NO abortamos: la función sabe generar sin ellas.
+  const assets = await buildBodegonAssets({ ref, normItems, layout, products });
+
+  const baseRow = {
     ref,
     numero,
     nombre: finalTitle,
@@ -483,7 +541,27 @@ export async function startBodegonGeneration({ items, extras, skus, title, descr
     productos,                       // [{sku, qty} | {sku:null, name, qty}]
     tags: finalTags,
     estado: 'generating',
-  });
+  };
+  const fullRow = {
+    ...baseRow,
+    layout: assets.layout,
+    layout_editado: !!layoutEditado,
+    instrucciones: instrucciones || null,
+    blueprint_path: assets.blueprint_path,
+    contactsheet_path: assets.contactsheet_path,
+  };
+
+  // Si las columnas del editor todavía no existen (falta pasar la migración de
+  // supabase/schema.sql), guardamos sin ellas en vez de dejar la app KO.
+  let { error: insErr } = await supabase.from('bodegones').insert(fullRow);
+  if (insErr && /column|schema cache/i.test(insErr.message || '')) {
+    console.warn(
+      '[bodegón] Faltan las columnas del editor de maqueta en Supabase ' +
+      '(layout, instrucciones, blueprint_path…). Ejecuta supabase/schema.sql. ' +
+      'Se guarda sin ellas: la generación funciona, pero sin maqueta.'
+    );
+    ({ error: insErr } = await supabase.from('bodegones').insert(baseRow));
+  }
   if (insErr) throw new Error('No se pudo registrar el bodegón: ' + insErr.message);
 
   // Disparar la función background. No esperamos al resultado porque Netlify
@@ -494,7 +572,11 @@ export async function startBodegonGeneration({ items, extras, skus, title, descr
     body: JSON.stringify({ ref }),
   }).catch(e => console.warn('Trigger background:', e));
 
-  return { id: ref, n: numero, title: finalTitle, description, tags: finalTags, items: productos, skus: normItems.map(i => i.sku) };
+  return {
+    id: ref, n: numero, title: finalTitle, description, tags: finalTags,
+    items: productos, skus: normItems.map(i => i.sku),
+    layout: assets.layout, instrucciones: instrucciones || '',
+  };
 }
 
 // Timeout 14 min: aprovechamos casi al límite los 15 min de la función

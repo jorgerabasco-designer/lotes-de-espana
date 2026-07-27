@@ -127,7 +127,7 @@ export default function BodegonOverlay({
               <div className="bo-error">
                 <div className="bo-error-t">No se ha podido generar el bodegón</div>
                 <div className="bo-error-s">{error}</div>
-                <button className="bo-btn bo-btn-ghost" onClick={onRegen}>{I.refresh({ size: 14 })} Reintentar</button>
+                <button className="bo-btn bo-btn-ghost" onClick={onRegen}>{I.edit({ size: 14 })} Ajustar y reintentar</button>
               </div>
             )}
 
@@ -167,8 +167,13 @@ export default function BodegonOverlay({
               </div>
             )}
           </div>
-          <button className="bo-regen" onClick={onRegen} disabled={generating} title="Regenerar otra variación (descarta el actual y empieza otra)">
-            {I.refresh({ size: 14 })} Regenerar
+          <button
+            className="bo-regen"
+            onClick={onRegen}
+            disabled={generating}
+            title="Coloca los productos a mano y di qué está mal antes de volver a generar"
+          >
+            {I.edit({ size: 14 })} Editar y regenerar
           </button>
         </div>
 

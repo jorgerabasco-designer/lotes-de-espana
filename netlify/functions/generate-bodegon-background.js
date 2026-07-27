@@ -55,9 +55,9 @@ invent packaging design. The viewer MUST be able to read every
 brand name and every line of label text exactly as in the reference.
 
 REFERENCE IMAGE MAPPING:
-"PRODUCT #N — REFERENCE IMAGE #N" maps each product description
-to its reference image. The reference images are attached to this
-request in the same order the products are listed.
+The exact role of every attached image is described in the
+"ATTACHED IMAGES" section further down. Read that section before
+drawing anything.
 
 PRODUCTS TO INCLUDE
 Use the attached reference images EXACTLY as shown. Do NOT redesign, recolor, retypeset or rewrite any label, logo, brand name or text on the packaging. Preserve every typography, color, illustration and detail of the original packaging with photographic, label-accurate fidelity. The viewer must be able to clearly read all brand names.
@@ -174,10 +174,19 @@ ORIENTATION:
 - Only genuinely flat items (flat turrón boxes, flat bonito/sardine
   tins) may lie flat, and ONLY in the front row, with their top label
   facing straight up to the camera.
-- A whole cured ham leg or shoulder (jamón / paleta), if present, is the
-  ONLY large item that may rest diagonally low at the very front of the
-  composition, as is traditional — but reproduce its cloth wrap and
-  label EXACTLY as in its reference image.
+JAMÓN / PALETA — MANDATORY, THE CUSTOMER IS STRICT ABOUT THIS:
+- If a whole cured ham leg or shoulder (jamón / paleta) is present, it is
+  the HERO of the hamper and the single LARGEST object in the frame —
+  roughly 3–4× the length of a wine bottle. Never shrink it down to the
+  size of a turrón box or a bottle.
+- It ALWAYS rests DIAGONALLY, at roughly 30° from horizontal, across the
+  FRONT-RIGHT of the composition: the wide butt end low on the left, the
+  narrow hock/hoof end raised UP and pointing to the RIGHT. This is how
+  the customer photographs every one of their hampers.
+- NEVER lay it flat horizontal, NEVER stand it vertical, NEVER point the
+  hoof to the left, NEVER hide it behind other products.
+- Reproduce its cloth wrap, netting, label and hoof EXACTLY as in its
+  reference image.
 
 LABEL & BRAND FIDELITY (most common serious error — avoid it):
 - Reproduce every label EXACTLY as in its reference image: identical
@@ -237,6 +246,10 @@ Before producing the image, mentally answer YES to ALL of these:
     jar, or a 5 kg jamón leg looks the same size as a 100 g
     turrón box → REDO with correct proportions.)
 
+  □ If there is a jamón or paleta: is it clearly the BIGGEST object,
+    lying DIAGONALLY at the front-right with the hoof raised to the
+    RIGHT? (Flat, vertical, hoof-left, or bottle-sized → REDO.)
+
   □ Are there 3 or fewer depth layers (BACK / MIDDLE / FRONT)?
     (4+ stacked vertical rows → REDO with wider horizontal spread.)
 
@@ -292,7 +305,113 @@ BEFORE OUTPUTTING THE IMAGE — MANDATORY TALLY:
 Wrong per-product counts are the single most common error and the
 single most damaging one for the customer — do not make it.`;
 
+// Jamones y paletas: familias 07 y 08 del código RP. Son la pieza más grande
+// del lote y se colocan siempre en diagonal con la pezuña arriba a la derecha,
+// que es como las monta el cliente.
+function isJamon(product) {
+  return /^0[78]/.test(String(product.ref || '')) || product.categoria_id === 'jamones';
+}
+
+// Explica el papel de cada imagen adjunta. Antes mandábamos una foto por
+// producto y el modelo se saturaba (máx. ~6 en alta fidelidad, 14 absoluto);
+// ahora van, por este orden: maqueta, hoja de contactos y hasta 4 protagonistas.
+function buildImageGuide({ hasBlueprint, strictLayout, hasSheet, heroNames }) {
+  const lines = [];
+  lines.push('================================================================');
+  lines.push('ATTACHED IMAGES — what each one is for');
+  lines.push('================================================================');
+  let n = 0;
+
+  if (hasBlueprint) {
+    n++;
+    lines.push(`IMAGE #${n} — COMPOSITION BLUEPRINT (layout map).`);
+    lines.push('  A flat cut-out mock-up of the hamper: every product already');
+    lines.push('  placed where it must appear, at its correct relative size.');
+    if (strictLayout) {
+      lines.push('  A HUMAN OPERATOR ARRANGED THIS BY HAND. It is a binding');
+      lines.push('  instruction, not a suggestion. Reproduce the SAME products in');
+      lines.push('  the SAME positions, at the SAME relative sizes and the SAME');
+      lines.push('  overlap order. Do NOT rearrange, re-sort, re-scale, add or');
+      lines.push('  remove anything. If your composition would place an item');
+      lines.push('  somewhere else, you are wrong — follow the blueprint.');
+    } else {
+      lines.push('  Use it as the guide for placement and RELATIVE SIZES. Keep the');
+      lines.push('  same tier structure and the same size relationships.');
+    }
+    lines.push('  Your job is to turn this flat mock-up into a REAL PHOTOGRAPH:');
+    lines.push('  add studio lighting, soft contact shadows, correct perspective');
+    lines.push('  and material realism — WITHOUT moving things around.');
+    lines.push('  The blueprint is a layout map only: never copy its hard cut-out');
+    lines.push('  edges, and never reproduce it as a flat collage.');
+  }
+
+  if (hasSheet) {
+    n++;
+    lines.push(`IMAGE #${n} — PRODUCT SHEET (identity chart).`);
+    lines.push('  A plain grid showing every product of this hamper, one per');
+    lines.push('  cell, in no particular order. Use it to read each label, logo,');
+    lines.push('  colour and packaging shape accurately: every item you draw must');
+    lines.push('  match one of these cells exactly, and no item outside this sheet');
+    lines.push('  may appear. It is NOT a layout reference — never arrange the');
+    lines.push('  final image as a grid, and never copy its uniform sizes (real');
+    lines.push('  sizes come from the blueprint and the cm figures above).');
+  }
+
+  if (heroNames && heroNames.length) {
+    lines.push(`IMAGES #${n + 1}–#${n + heroNames.length} — HERO CLOSE-UPS, in this order:`);
+    heroNames.forEach((name, i) => lines.push(`  #${n + 1 + i}: ${name}`));
+    lines.push('  These are the biggest / most prominent items. Their labels must');
+    lines.push('  be pixel-accurate to these close-ups.');
+  }
+
+  lines.push('');
+  lines.push('NONE of the attached images contain text overlays, numbers or');
+  lines.push('watermarks added by us. Never draw any such marking into the output.');
+  return lines.join('\n');
+}
+
+// Cuando el usuario ha movido los productos a mano, su maqueta manda por
+// encima de las reglas genéricas de composición (que hablan de repartir,
+// 3 alturas, porcentajes de encuadre…).
+const STRICT_LAYOUT_OVERRIDE = `
+================================================================
+THE BLUEPRINT OVERRIDES THE COMPOSITION RULES
+================================================================
+A human operator arranged IMAGE #1 by hand, product by product.
+Wherever the general composition guidance above (tier structure,
+lateral spread, 3-layer limit, framing percentages, symmetry)
+disagrees with that blueprint, THE BLUEPRINT WINS.
+
+Keep every product at the position, the scale and the overlap order
+shown in the blueprint. You still decide lighting, shadows,
+perspective realism and material rendering — nothing else.
+
+Do not "improve" their arrangement. They arranged it that way on
+purpose, after the previous attempt got it wrong.`;
+
+// Correcciones escritas por el usuario tras ver una generación anterior.
+// Van al final del prompt, que es donde más peso tienen.
+function buildCorrections(instrucciones) {
+  const txt = String(instrucciones || '').trim();
+  if (!txt) return '';
+  return `
+================================================================
+OPERATOR CORRECTIONS — HIGHEST PRIORITY, READ LAST, OBEY FIRST
+================================================================
+A human reviewed a previous attempt at this exact hamper and found
+it wrong. These are their corrections, in their own words (Spanish).
+They describe REAL defects in the previous output. Fix every one of
+them. Where a correction conflicts with any general rule above, THE
+CORRECTION WINS.
+
+${txt}
+
+Re-read those corrections before you output. If your image would
+still show any of the problems described, redo it.`;
+}
+
 function placeFor(product) {
+  if (isJamon(product)) return 'DELANTERA';
   // Si el producto trae posición explícita, respetarla. Si no, derivarla por altura.
   const explicit = (product.posicion || '').toUpperCase();
   if (['TRASERA', 'MEDIA', 'DELANTERA'].includes(explicit)) return explicit;
@@ -303,6 +422,17 @@ function placeFor(product) {
 }
 
 function placeInstruction(product) {
+  if (isJamon(product)) {
+    return {
+      zoneEng: 'FRONT',
+      instr: 'THE HERO ITEM — a whole cured ham/shoulder leg. Place it DIAGONALLY at roughly '
+        + '30° across the front-right of the composition, resting on its wide end at the '
+        + 'bottom-left of the leg, with the narrow hock/hoof end raised UP and pointing to '
+        + 'the RIGHT. Never flat-horizontal, never vertical, never pointing left. It is by '
+        + 'far the LARGEST object in the hamper — roughly 3–4× the length of a wine bottle — '
+        + 'and must read as such. Reproduce its cloth wrap, netting and label exactly',
+    };
+  }
   const zone = placeFor(product);
   const w = Number(product.ancho || 0);
   const h = Number(product.alto || 0);
@@ -334,7 +464,13 @@ function buildProductsBlock(products) {
     if (p.categoria_id || p.categoria) lines.push(`  Category: ${p.categoria_id || p.categoria}`);
     if (p.descripcion_visual) lines.push(`  Visual description: ${p.descripcion_visual}`);
     if (Array.isArray(p.tags) && p.tags.length) lines.push(`  Attributes: ${p.tags.join(', ')}`);
-    lines.push(`  Real physical size: ${p.alto} × ${p.ancho} × ${p.fondo} cm`);
+    // OJO: `alto` por sí solo engaña con las piezas tumbadas (un jamón mide 20
+    // de alto pero 80 de largo). Damos también el lado mayor, que es lo que
+    // determina cuánto ocupa en la foto.
+    const alto = Number(p.alto || 0), ancho = Number(p.ancho || 0);
+    const largest = Math.max(alto, ancho);
+    lines.push(`  Real physical size: ${p.alto} × ${p.ancho} × ${p.fondo} cm (height × width × depth, as displayed)`);
+    lines.push(`  Longest visible dimension: ${largest} cm — THIS is how much space it takes in frame`);
     lines.push(`  QUANTITY: include EXACTLY ${qty} ${qty === 1 ? 'unit' : 'identical units'} of this product in the composition${qty > 1 ? ', placed next to each other as a small group' : ''}`);
     lines.push(`  Position: ${zoneEng} tier — ${instr}`);
     if (p.notas) lines.push(`  Notes: ${p.notas}`);
@@ -443,34 +579,73 @@ export const handler = async (event) => {
     if (setting?.value && typeof setting.value === 'string') template = setting.value;
   } catch {}
 
-  // 4) Construir prompt
+  // 4) Imágenes de referencia.
+  //
+  // IMPORTANTE: Gemini 3 Pro sostiene ~6 imágenes de referencia en alta
+  // fidelidad (14 como tope duro). Antes mandábamos UNA POR PRODUCTO, así que
+  // un lote de 20 se pasaba de largo y el modelo empezaba a inventar etiquetas,
+  // duplicar unidades y equivocarse de tamaños. Ahora mandamos como mucho 6:
+  //   1. la maqueta (dónde va cada cosa)
+  //   2. la hoja de contactos (qué es cada cosa)
+  //   3. hasta 4 protagonistas a tamaño completo (etiquetas nítidas)
   const { block: productsBlock, totalUnits, sorted: sortedProducts } = buildProductsBlock(productsWithQty);
+  const tImg0 = Date.now();
+
+  const grab = async (bucket, path) => {
+    if (!path) return null;
+    try {
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      return await fetchAsBase64(data.publicUrl);
+    } catch (e) {
+      console.warn('No se pudo descargar', bucket, path, e.message);
+      return null;
+    }
+  };
+
+  const [blueprint, sheet] = await Promise.all([
+    grab('bodegones', bod.blueprint_path),
+    grab('bodegones', bod.contactsheet_path),
+  ]);
+
+  // Protagonistas = los de mayor lado visible (botellas, jamones): son los que
+  // dominan el encuadre y cuyas etiquetas se leen.
+  const prominence = (p) => Math.max(Number(p.alto || 0), Number(p.ancho || 0));
+  const heroLimit = blueprint ? 4 : (sheet ? 5 : 6);
+  const heroes = [...sortedProducts].sort((a, b) => prominence(b) - prominence(a)).slice(0, heroLimit);
+  const heroImgs = await Promise.all(heroes.map(h => grab('productos', h.foto_path)));
+
+  const refImages = [];
+  const heroNames = [];
+  if (blueprint) refImages.push(blueprint);
+  if (sheet) refImages.push(sheet);
+  heroes.forEach((h, i) => {
+    if (!heroImgs[i]) return;
+    refImages.push(heroImgs[i]);
+    heroNames.push(`${h.marca || ''} ${h.nombre}`.trim());
+  });
+  console.log(
+    `[Gemini] ${refImages.length} referencias en ${((Date.now() - tImg0) / 1000).toFixed(1)}s ` +
+    `(maqueta:${blueprint ? 'sí' : 'no'} hoja:${sheet ? 'sí' : 'no'} protagonistas:${heroNames.length} de ${sortedProducts.length} productos)`
+  );
+
+  // 5) Construir prompt
+  const imageGuide = buildImageGuide({
+    hasBlueprint: !!blueprint,
+    strictLayout: !!bod.layout_editado,
+    hasSheet: !!sheet,
+    heroNames,
+  });
   const prompt = template
     .replace('{PRODUCTS}', productsBlock)
     .replace(/\{N\}/g, String(totalUnits))
+    + '\n\n' + imageGuide
     + '\n\n' + STRUCTURE_RULES
-    + '\n\n' + QUANTITY_RULES.replace(/\{N\}/g, String(totalUnits));
+    + '\n\n' + QUANTITY_RULES.replace(/\{N\}/g, String(totalUnits))
+    + (bod.layout_editado ? '\n\n' + STRICT_LAYOUT_OVERRIDE : '')
+    + buildCorrections(bod.instrucciones);
 
   // Guardar el prompt usado (para referencia) y mantener estado 'generating'
   await supabase.from('bodegones').update({ prompt_usado: prompt }).eq('ref', ref);
-
-  // 5) Descargar imágenes de referencia EN PARALELO. Antes eran secuenciales y
-  // con 20+ productos suponía 10-15s extra de espera. Ahora Promise.all las
-  // baja a 1-2s. Mantenemos el ORDEN ORIGINAL para que "PRODUCT #N —
-  // REFERENCE IMAGE #N" siga mapeando correctamente.
-  const tImg0 = Date.now();
-  const refResults = await Promise.all(sortedProducts.map(async (r) => {
-    try {
-      const { data } = supabase.storage.from('productos').getPublicUrl(r.foto_path);
-      const inline = await fetchAsBase64(data.publicUrl);
-      return inline;
-    } catch (e) {
-      console.warn('Sin imagen para', r.ref, e.message);
-      return null;
-    }
-  }));
-  const refImages = refResults.filter(Boolean);
-  console.log(`[Gemini] descarga de ${refImages.length} imágenes en ${((Date.now() - tImg0) / 1000).toFixed(1)}s`);
 
   // 6) Llamar a Gemini 3 Pro. Reintentamos varias veces ante errores
   //    transitorios (5xx, overloaded, timeouts puntuales). Pro es el ÚNICO

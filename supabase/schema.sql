@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS bodegones (
 ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
 ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS generation_seconds INTEGER;
 ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS modelo_usado TEXT;
+-- Editor de maqueta (julio 2026): el usuario coloca los productos a mano y
+-- escribe qué está mal; esa maqueta se le manda a Gemini como plano vinculante.
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS layout JSONB;              -- posiciones/tamaños
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS layout_editado BOOLEAN DEFAULT FALSE;
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS instrucciones TEXT;        -- correcciones del usuario
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS blueprint_path TEXT;       -- maqueta en Storage
+ALTER TABLE bodegones ADD COLUMN IF NOT EXISTS contactsheet_path TEXT;    -- hoja de contactos
 
 -- Si la tabla ya existe con un constraint sin 'draft', actualízalo.
 DO $$

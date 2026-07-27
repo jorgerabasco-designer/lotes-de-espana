@@ -9,6 +9,7 @@ import BodegonOverlay from './components/BodegonOverlay.jsx';
 import ImportExcelModal from './components/ImportExcelModal.jsx';
 import SpecialOrderModal from './components/SpecialOrderModal.jsx';
 import BodegonEditOverlay from './components/BodegonEditOverlay.jsx';
+import BodegonEditorOverlay from './components/BodegonEditorOverlay.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
 import WebScreen from './components/WebScreen.jsx';
 import MinimizedGenPill from './components/MinimizedGenPill.jsx';
@@ -81,6 +82,7 @@ export default function App() {
 
   // Editar un bodegón del historial (regenerar o crear como nuevo).
   const [editBodegon, setEditBodegon] = useState(null);
+  const [editorGen, setEditorGen] = useState(null); // bodegón abierto en el editor de maqueta
 
   // Diálogo informativo / de aviso global (sustituye a los alert() nativos).
   // Se rellena con { title, description, icon, tone, confirmLabel, onConfirm? }
@@ -205,13 +207,25 @@ export default function App() {
   // Arranca una generación nueva. Se PERMITE tener varias en cola (multi-gen):
   // al lanzarla se añade a `activeGens` y se abre el overlay para verla. Si
   // ya hay otra abierta, se minimiza y la nueva pasa al primer plano.
-  const startBodegon = async ({ items, extras, title, description, tags }) => {
-    if (!items || items.length < 2) return;
+  const startBodegon = async ({ items, extras, title, description, tags, layout, instrucciones, layoutEditado }) => {
+    // `items` puede venir mezclado (productos del catálogo + extras sin foto),
+    // porque al regenerar se reutiliza la lista completa del bodegón anterior.
+    // Separarlos aquí evita que un extra acabe colándose como producto.
+    const all = items || [];
+    const realItems = all.filter(it => it.sku).map(it => ({ sku: it.sku, qty: it.qty || 1 }));
+    const extraItems = [
+      ...all.filter(it => !it.sku).map(it => ({ name: it.name, ref: it.ref || null, qty: it.qty || 1 })),
+      ...(extras || []).map(e => ({ name: e.name, ref: e.ref || null, qty: e.qty || 1 })),
+    ];
+    if (realItems.length < 2) return;
     ensureNotifPermission();
-    const extraItems = (extras || []).map(e => ({ name: e.name, ref: e.ref || null, qty: e.qty || 1 }));
     try {
       const created = await startBodegonGeneration({
-        items, extras: extraItems, title, description: description || '', tags: tags || [],
+        items: realItems, extras: extraItems, title, description: description || '', tags: tags || [],
+        layout: layout || null,
+        instrucciones: instrucciones || '',
+        layoutEditado: !!layoutEditado,
+        products,   // el catálogo: hace falta para montar maqueta y hoja de contactos
       });
       const gen = {
         ref: created.id,
@@ -221,9 +235,11 @@ export default function App() {
         // items = productos con foto (sku) + extras sin foto (name), para que el
         // PDF y el listado los muestren todos.
         items: [
-          ...items.map(i => ({ sku: i.sku, qty: i.qty || 1 })),
+          ...realItems,
           ...extraItems.map(e => ({ sku: null, name: e.name, ref: e.ref, qty: e.qty })),
         ],
+        layout: created.layout || layout || null,
+        instrucciones: instrucciones || '',
         status: 'generating',
         image: null,
         image_path: null,
@@ -332,15 +348,26 @@ export default function App() {
   // Operan SIEMPRE sobre la generación que se está viendo (viewingGen).
   // Minimizar/X = solo cerrar la vista; la gen sigue corriendo en background.
   const handleOverlayMinimize = () => setViewingRef(null);
+  // "Editar y regenerar": abre el editor de maqueta en vez de repetir la
+  // generación a ciegas (que solía repetir los mismos fallos).
   const handleOverlayRegen = () => {
-    const gen = viewingGen;
+    if (viewingGen) setEditorGen(viewingGen);
+  };
+
+  // Vuelve a generar el bodegón aplicando la maqueta y las correcciones.
+  const handleEditorApply = ({ layout, instrucciones }) => {
+    const gen = editorGen;
     if (!gen) return;
+    setEditorGen(null);
     const { items, title, description, tags } = gen;
     const oldRef = gen.ref;
     removeGen(oldRef);
     setViewingRef(null);
     discardBodegon(oldRef).catch(() => {});
-    setTimeout(() => startBodegon({ items, title, description, tags }), 50);
+    setTimeout(() => startBodegon({
+      items, title, description, tags,
+      layout, instrucciones, layoutEditado: true,
+    }), 50);
   };
   const handleOverlaySave = async () => {
     const gen = viewingGen;
@@ -573,6 +600,14 @@ export default function App() {
         onClose={() => setSpecialOrderOpen(false)}
         products={products}
         onConfirm={handleSpecialOrderConfirm}
+      />
+
+      <BodegonEditorOverlay
+        open={!!editorGen}
+        gen={editorGen}
+        products={products}
+        onClose={() => setEditorGen(null)}
+        onApply={handleEditorApply}
       />
 
       {editBodegon && (
