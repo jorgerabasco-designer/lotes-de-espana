@@ -463,8 +463,8 @@ async function buildBodegonAssets({ ref, normItems, layout, products }) {
 
     const uniques = [...new Map(entries.map(e => [e.product.sku, e.product])).values()];
     const [bp, sheet] = await Promise.all([
-      renderBlueprint(finalLayout, catalog),
-      renderContactSheet(uniques),
+      renderBlueprint(finalLayout, catalog, { metrics }),
+      renderContactSheet(uniques, { metrics }),
     ]);
 
     if (bp) out.blueprint_path = await uploadBodegonAsset(bp, `${ref}_blueprint.jpg`);
@@ -512,6 +512,20 @@ export async function startBodegonGeneration({
     normItems = skus.map(s => ({ sku: s, qty: 1 }));
   }
   if (normItems.length === 0) throw new Error('Selecciona al menos un producto.');
+
+  // Si la maqueta se ha montado a mano, manda ella: las unidades que se le
+  // piden a la IA son las que el usuario ha dejado puestas. Así duplicar o
+  // quitar un producto en el editor cuadra con la foto y con el listado.
+  if (layoutEditado && layout?.items?.length) {
+    const counts = new Map();
+    for (const it of layout.items) {
+      if (it.sku) counts.set(it.sku, (counts.get(it.sku) || 0) + 1);
+    }
+    const ajustados = normItems
+      .filter(it => counts.has(it.sku))
+      .map(it => ({ ...it, qty: counts.get(it.sku) }));
+    if (ajustados.length) normItems = ajustados;
+  }
 
   // Items "extra" sin sku (cajas, regalos, estuches que no están en el
   // catálogo): se guardan por su nombre para que salgan en el listado y el

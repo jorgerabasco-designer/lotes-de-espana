@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { I } from './icons.jsx';
-import { autoLayout, loadMetrics, normalizeLayoutToImages, MASK } from '../lib/composer.js';
+import { autoLayout, loadMetrics, normalizeLayoutToImages, MASK, isJamon } from '../lib/composer.js';
 
 // Editor de la maqueta del bodegón.
 //
@@ -23,11 +23,20 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(null);
   const [instrucciones, setInstrucciones] = useState('');
-  const [showRef, setShowRef] = useState(true);
+  // Apagada por defecto: al superponerse con los productos de la maqueta se
+  // confundía con productos "que no se dejan seleccionar".
+  const [showRef, setShowRef] = useState(false);
   const [ready, setReady] = useState(false);
+  const [applying, setApplying] = useState(false);
   const stageRef = useRef(null);
+  const wrapRef = useRef(null);
   const dragState = useRef(null);
   const metricsRef = useRef(new Map());
+  // El lienzo tiene que ser 4:3 EXACTO, igual que la maqueta que se le manda a
+  // la IA: si no, lo que se coloca aquí no es lo que sale allí. Con CSS puro
+  // (aspect-ratio + max-width/height) el navegador rompe la proporción en
+  // cuanto una de las dos medidas topa, así que se calcula a mano.
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
 
   const bySku = useMemo(
     () => new Map((products || []).map(p => [p.sku, p])),
@@ -64,6 +73,26 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
     })();
     return () => { cancelled = true; };
   }, [open, gen?.ref]);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    const fit = () => {
+      // Hay que medir el hueco REAL (sin el relleno del contenedor), o el
+      // lienzo se pasa de ancho y el flex lo encoge rompiendo la proporción.
+      const cs = getComputedStyle(el);
+      const availW = el.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+      const availH = el.clientHeight - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
+      if (availW <= 0 || availH <= 0) return;
+      const w = Math.floor(Math.min(availW, (availH * 4) / 3));
+      setStageSize({ w, h: Math.round((w * 3) / 4) });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);
 
   const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
@@ -129,11 +158,20 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
       const halfW = (it.w * rect.width) / 2;
       const halfH = (it.h * rect.height) / 2;
       if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) continue;
-      const mask = metricsRef.current.get(it.sku)?.mask;
-      if (!mask) return i; // sin máscara (JPEG opaco): vale toda la caja
-      const u = Math.min(MASK - 1, Math.max(0, Math.round(((dx + halfW) / (halfW * 2)) * (MASK - 1))));
-      const v = Math.min(MASK - 1, Math.max(0, Math.round(((dy + halfH) / (halfH * 2)) * (MASK - 1))));
-      if (mask[(v * MASK + u) * 4 + 3] > 12) return i;
+      const m = metricsRef.current.get(it.sku);
+      if (!m?.mask) return i; // sin máscara (foto opaca): vale toda la caja
+      // La foto va con object-fit:contain dentro de la caja. Si la caja no
+      // tuviera exactamente su proporción quedarían bandas vacías, así que se
+      // mide sobre la foto de verdad y no sobre la caja.
+      let iw = halfW * 2, ih = halfH * 2;
+      if (m.ratio && isFinite(m.ratio)) {
+        if (iw / ih > m.ratio) iw = ih * m.ratio;
+        else ih = iw / m.ratio;
+      }
+      if (Math.abs(dx) > iw / 2 || Math.abs(dy) > ih / 2) continue;
+      const u = Math.min(MASK - 1, Math.max(0, Math.round(((dx + iw / 2) / iw) * (MASK - 1))));
+      const v = Math.min(MASK - 1, Math.max(0, Math.round(((dy + ih / 2) / ih) * (MASK - 1))));
+      if (m.mask[(v * MASK + u) * 4 + 3] > 12) return i;
     }
     return null;
   };
@@ -192,23 +230,42 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   const minZ = items.reduce((m, it) => Math.min(m, it.z || 0), 0);
   const bringFront = () => setItems(l => l.map((it, i) => i === sel ? { ...it, z: maxZ + 1 } : it));
   const sendBack  = () => setItems(l => l.map((it, i) => i === sel ? { ...it, z: minZ - 1 } : it));
-  const scaleSel  = (k) => setItems(l => l.map((it, i) => {
-    if (i !== sel) return it;
-    const w = Math.min(1.6, Math.max(0.02, it.w * k));
-    const h = it.h * (w / it.w);
-    return { ...it, w, h, x: it.x + it.w / 2 - w / 2, y: it.y + it.h / 2 - h / 2 };
-  }));
+  const rotateSel = (deg) => setItems(l => l.map((it, i) => i === sel ? { ...it, rot: (it.rot || 0) + deg } : it));
+
+  // Duplicar = una unidad más de ese producto en la foto. Quitar = una menos.
+  // La cantidad que se le pide a la IA sale de la maqueta, así que las dos
+  // cosas cuadran solas con lo que se ve.
+  const duplicateSel = () => {
+    if (sel == null) return;
+    const it = items[sel];
+    setItems(l => [...l, { ...it, x: Math.min(0.96, it.x + 0.04), y: it.y, z: maxZ + 1 }]);
+    setSel(items.length);
+  };
+  const removeSel = () => {
+    if (sel == null) return;
+    setItems(l => l.filter((_, i) => i !== sel));
+    setSel(null);
+  };
 
   const reset = () => {
     setItems(autoLayout(entries, metricsRef.current).items);
     setSel(null);
   };
 
-  const apply = () => {
-    onApply?.({
-      layout: { version: 1, canvas: { w: 2048, h: 1536 }, items },
-      instrucciones: instrucciones.trim(),
-    });
+  // Se mantiene el editor abierto (en modo "aplicando") hasta que la nueva
+  // generación está en marcha: antes se cerraba al instante y aparecía una
+  // ventana nueva unos segundos después, que despistaba.
+  const apply = async () => {
+    if (applying) return;
+    setApplying(true);
+    try {
+      await onApply?.({
+        layout: { version: 1, canvas: { w: 2048, h: 1536 }, items },
+        instrucciones: instrucciones.trim(),
+      });
+    } finally {
+      setApplying(false);
+    }
   };
 
   const selItem = sel != null ? items[sel] : null;
@@ -223,13 +280,18 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
           <div className="bed-head">
             <div className="bed-eye">Editar composición</div>
             <div className="bed-hint">
-              Arrastra los productos para colocarlos. Selecciona uno y usa el tirador de la esquina
-              para hacerlo más grande o más pequeño, y el de arriba para girarlo.
+              Arrastra los productos para colocarlos. Al seleccionar uno salen cuatro puntos en las
+              esquinas: tira de ellos para hacerlo más grande o más pequeño.
             </div>
           </div>
 
-          <div className="bed-stage-wrap">
-            <div className="bed-stage" ref={stageRef} onPointerDown={onStagePointerDown}>
+          <div className="bed-stage-wrap" ref={wrapRef}>
+            <div
+              className="bed-stage"
+              ref={stageRef}
+              onPointerDown={onStagePointerDown}
+              style={stageSize.w ? { width: stageSize.w, height: stageSize.h } : undefined}
+            >
               {showRef && gen.image && <img className="bed-under" src={gen.image} alt="" draggable={false}/>}
               {!ready && <div className="bed-loading">Preparando la maqueta…</div>}
               {ready && items.map((it, i) => {
@@ -238,51 +300,79 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
                 return (
                   <div
                     key={i}
-                    className={`bed-item ${sel === i ? 'sel' : ''}`}
+                    className="bed-item"
                     style={{
                       left: `${it.x * 100}%`,
                       top: `${it.y * 100}%`,
                       width: `${it.w * 100}%`,
                       height: `${it.h * 100}%`,
-                      zIndex: 1000 + (it.z || 0),
+                      zIndex: 100 + (it.z || 0),
                       transform: `rotate(${it.rot || 0}deg)`,
                     }}
                     title={p.name}
                   >
-                    <img src={p.img} alt="" draggable={false}/>
-                    {sel === i && (
-                      <>
-                        <span
-                          className="bed-handle bed-rot"
-                          onPointerDown={(e) => startDrag(e, i, 'rotate')}
-                          title="Girar (Mayús para saltos de 15°)"
-                        >{I.refresh({ size: 11 })}</span>
-                        <span
-                          className="bed-handle bed-scale"
-                          onPointerDown={(e) => startDrag(e, i, 'scale')}
-                          title="Más grande / más pequeño"
-                        />
-                      </>
-                    )}
+                    <img src={metricsRef.current.get(it.sku)?.src || p.img} alt="" draggable={false}/>
                   </div>
                 );
               })}
+
+              {/* Recuadro y tiradores del seleccionado, en una capa por encima
+                  de TODOS los productos: si fueran hijos del producto, los que
+                  van delante los taparían y no se podrían coger. */}
+              {ready && selItem && (() => {
+                // El recuadro abraza el PRODUCTO, no la foto: si no, con el
+                // aire transparente de los recortes salía un marco enorme y los
+                // nodos quedaban lejos del producto.
+                const t = metricsRef.current.get(selItem.sku)?.trim || { l: 0, r: 0, t: 0, b: 0 };
+                const bx = selItem.x + t.l * selItem.w;
+                const by = selItem.y + t.t * selItem.h;
+                const bw = selItem.w * (1 - t.l - t.r);
+                const bh = selItem.h * (1 - t.t - t.b);
+                return (
+                <div
+                  className="bed-selbox-layer"
+                  style={{
+                    left: `${bx * 100}%`,
+                    top: `${by * 100}%`,
+                    width: `${bw * 100}%`,
+                    height: `${bh * 100}%`,
+                    transform: `rotate(${selItem.rot || 0}deg)`,
+                  }}
+                >
+                  {['nw', 'ne', 'sw', 'se'].map(corner => (
+                    <span
+                      key={corner}
+                      className={`bed-handle bed-${corner}`}
+                      onPointerDown={(e) => startDrag(e, sel, 'scale')}
+                      title="Arrastra para hacerlo más grande o más pequeño"
+                    />
+                  ))}
+                </div>
+                );
+              })()}
             </div>
           </div>
 
           <div className="bed-toolbar">
-            {gen.image && (
-              <button className={`bed-tool ${showRef ? 'on' : ''}`} onClick={() => setShowRef(v => !v)}>
-                {I.expand({ size: 13 })} Foto de referencia
-              </button>
-            )}
+            <button className="bed-tool" disabled={sel == null} onClick={duplicateSel}>Duplicar</button>
+            <button className="bed-tool" disabled={sel == null} onClick={removeSel}>Quitar</button>
             <div className="bed-tool-sep"/>
-            <button className="bed-tool" disabled={sel == null} onClick={() => scaleSel(1.1)}>Más grande</button>
-            <button className="bed-tool" disabled={sel == null} onClick={() => scaleSel(0.9)}>Más pequeño</button>
             <button className="bed-tool" disabled={sel == null} onClick={bringFront}>Traer al frente</button>
             <button className="bed-tool" disabled={sel == null} onClick={sendBack}>Enviar atrás</button>
             <div className="bed-tool-sep"/>
+            <button className="bed-tool" disabled={sel == null} onClick={() => rotateSel(-15)} title="Girar a la izquierda">↺</button>
+            <button className="bed-tool" disabled={sel == null} onClick={() => rotateSel(15)} title="Girar a la derecha">↻</button>
+            <div className="bed-tool-sep"/>
             <button className="bed-tool" onClick={reset}>{I.refresh({ size: 13 })} Reiniciar</button>
+            {gen.image && (
+              <button
+                className={`bed-tool ${showRef ? 'on' : ''}`}
+                onClick={() => setShowRef(v => !v)}
+                title="Superpone la foto anterior, en transparencia, para comparar"
+              >
+                {I.expand({ size: 13 })} Comparar con la foto
+              </button>
+            )}
           </div>
         </div>
 
@@ -311,16 +401,18 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
             value={instrucciones}
             onChange={e => setInstrucciones(e.target.value)}
             rows={7}
-            placeholder={'Escribe aquí las correcciones, como se lo dirías a un fotógrafo. Por ejemplo:\n\n· La botella de vino sale dos veces, solo va una.\n· El jamón tiene que ir más grande y en diagonal.\n· La caja de turrón está tumbada, va de pie.'}
+            placeholder={'Por ejemplo: la botella de vino sale dos veces, solo va una.'}
           />
           <div className="bed-note-hint">
-            Se le manda al modelo junto con la maqueta. Cuanto más concreto, mejor.
+            Cuanto más concreto, mejor.
           </div>
 
           <div className="bed-actions">
-            <button className="bed-btn bed-btn-ghost" onClick={onClose}>Cancelar</button>
-            <button className="bed-btn bed-btn-primary" onClick={apply} disabled={!ready}>
-              {I.sparkle({ size: 14 })} Aplicar y regenerar
+            <button className="bed-btn bed-btn-ghost" onClick={onClose} disabled={applying}>Cancelar</button>
+            <button className="bed-btn bed-btn-primary" onClick={apply} disabled={!ready || applying}>
+              {applying
+                ? <>Aplicando cambios…</>
+                : <>{I.sparkle({ size: 14 })} Aplicar y regenerar</>}
             </button>
           </div>
         </aside>
@@ -340,8 +432,8 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         .bed-hint{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.5;max-width:560px}
 
         .bed-stage-wrap{flex:1;min-height:0;padding:4px 26px 0;display:flex;align-items:center;justify-content:center}
-        /* El lienzo se ajusta al hueco disponible manteniendo 4:3 exacto. */
-        .bed-stage{position:relative;height:100%;width:auto;aspect-ratio:4/3;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;touch-action:none;user-select:none}
+        /* El tamaño exacto lo pone JS (4:3 clavado); esto es solo el aspecto. */
+        .bed-stage{position:relative;flex:0 0 auto;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;touch-action:none;user-select:none}
         .bed-under{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;opacity:.22;pointer-events:none;z-index:1}
         .bed-loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:13px}
 
@@ -350,12 +442,17 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
            no tape a los productos de debajo. Los tiradores sí lo capturan. */
         .bed-item{position:absolute;pointer-events:none}
         .bed-item img{width:100%;height:100%;object-fit:contain;pointer-events:none;filter:drop-shadow(0 6px 10px rgba(45,42,38,.16))}
-        .bed-item.sel{outline:1.5px dashed var(--accent);outline-offset:3px;border-radius:2px}
         .bed-stage{cursor:grab}
         .bed-stage:active{cursor:grabbing}
-        .bed-handle{position:absolute;pointer-events:auto;background:var(--accent);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.28);display:grid;place-items:center;color:#fff}
-        .bed-scale{width:16px;height:16px;border-radius:50%;right:-9px;bottom:-9px;cursor:nwse-resize}
-        .bed-rot{width:20px;height:20px;border-radius:50%;left:50%;top:-26px;margin-left:-10px;cursor:grab}
+
+        /* Capa de selección: por encima de todos los productos (z 100..999). */
+        .bed-selbox-layer{position:absolute;z-index:5000;pointer-events:none;outline:1.5px dashed var(--accent);outline-offset:3px;border-radius:2px}
+        .bed-handle{position:absolute;width:14px;height:14px;border-radius:50%;pointer-events:auto;background:#fff;border:2.5px solid var(--accent);box-shadow:0 2px 6px rgba(0,0,0,.3);transition:transform .1s}
+        .bed-handle:hover{transform:scale(1.25)}
+        .bed-nw{left:-8px;top:-8px;cursor:nwse-resize}
+        .bed-ne{right:-8px;top:-8px;cursor:nesw-resize}
+        .bed-sw{left:-8px;bottom:-8px;cursor:nesw-resize}
+        .bed-se{right:-8px;bottom:-8px;cursor:nwse-resize}
 
         .bed-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:14px 26px 18px}
         .bed-tool{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;background:#fff;border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .12s}

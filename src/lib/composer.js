@@ -59,6 +59,70 @@ export async function loadImage(url) {
   }
 }
 
+// Carga una imagen ya en memoria (data URL), sin pasar por fetch.
+function loadImageSrc(src) {
+  return new Promise((resolve) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => resolve(null);
+    i.src = src;
+  });
+}
+
+// Quita el fondo blanco de una foto.
+//
+// Casi todo el catálogo viene recortado con transparencia, pero unas cuantas
+// fotos traen el fondo pintado de blanco: en el editor se veían como cajas
+// blancas tapando a los productos de detrás.
+//
+// Solo se borra el blanco que TOCA EL BORDE (relleno por inundación desde los
+// cuatro lados). Así un producto blanco, o una etiqueta blanca en mitad de la
+// foto, no se tocan nunca.
+// Devuelve un data URL, o null si no había fondo que quitar.
+const KEY_MAX_SIDE = 1000;
+const KEY_WHITE = 234;   // a partir de aquí se considera blanco de fondo
+export function keyWhiteBackground(img) {
+  const scale = Math.min(1, KEY_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const W = Math.max(1, Math.round(img.naturalWidth * scale));
+  const H = Math.max(1, Math.round(img.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, W, H);
+
+  let imgData;
+  try { imgData = ctx.getImageData(0, 0, W, H); }
+  catch { return null; }
+  const d = imgData.data;
+
+  const isBg = (i) => d[i + 3] > 10 && d[i] >= KEY_WHITE && d[i + 1] >= KEY_WHITE && d[i + 2] >= KEY_WHITE;
+
+  const seen = new Uint8Array(W * H);
+  const stack = [];
+  const push = (x, y) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    const p = y * W + x;
+    if (seen[p]) return;
+    seen[p] = 1;
+    if (isBg(p * 4)) stack.push(p);
+  };
+  for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
+  for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
+
+  let removed = 0;
+  while (stack.length) {
+    const p = stack.pop();
+    d[p * 4 + 3] = 0;
+    removed++;
+    const x = p % W, y = (p / W) | 0;
+    push(x - 1, y); push(x + 1, y); push(x, y - 1); push(x, y + 1);
+  }
+  if (removed < W * H * 0.02) return null; // no había fondo blanco que valga
+
+  ctx.putImageData(imgData, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
 // ¿Es un jamón o una paleta? Las familias 07 (paletas) y 08 (jamones) del
 // código RP lo dicen sin ambigüedad. Van en diagonal, con la pezuña a la
 // derecha, y son mucho más grandes que el resto.
@@ -137,13 +201,23 @@ function measureImage(img) {
   return { ratio: img.naturalWidth / img.naturalHeight, trim, mask: data };
 }
 
-// Map sku → { ratio, trim, mask }. Una sola pasada de carga por producto.
+// Map sku → { ratio, trim, mask, src }. Una sola pasada de carga por producto.
+// `src` es la foto ya lista para pintar: si traía fondo blanco, se le ha
+// quitado, así que en el editor y en la maqueta todo va recortado.
 export async function loadMetrics(products) {
   const out = new Map();
   await Promise.all((products || []).map(async (p) => {
     if (!p?.img || out.has(p.sku)) return;
-    const img = await loadImage(p.img);
-    if (img?.naturalWidth) out.set(p.sku, measureImage(img));
+    const original = await loadImage(p.img);
+    if (!original?.naturalWidth) return;
+    let img = original;
+    let src = p.img;
+    const keyed = keyWhiteBackground(original);
+    if (keyed) {
+      const kimg = await loadImageSrc(keyed);
+      if (kimg?.naturalWidth) { img = kimg; src = keyed; }
+    }
+    out.set(p.sku, { ...measureImage(img), src });
   }));
   return out;
 }
@@ -305,6 +379,7 @@ function centerWeighted(list) {
 // Pinta la maqueta a un canvas y devuelve un Blob JPEG.
 // `products` = catálogo (para resolver la imagen de cada sku).
 export async function renderBlueprint(layout, products, opts = {}) {
+  const metrics = opts.metrics || null;
   const scale = opts.scale || 1;
   const W = Math.round((layout?.canvas?.w || CANVAS_W) * scale);
   const H = Math.round((layout?.canvas?.h || CANVAS_H) * scale);
@@ -325,7 +400,10 @@ export async function renderBlueprint(layout, products, opts = {}) {
   const urls = new Map();
   for (const it of items) {
     const p = bySku.get(it.sku);
-    if (p?.img && !urls.has(it.sku)) urls.set(it.sku, loadImage(p.img));
+    if (urls.has(it.sku)) continue;
+    // Preferimos la versión sin fondo blanco que dejó loadMetrics.
+    const src = metricOf(metrics, it.sku)?.src || p?.img;
+    if (src) urls.set(it.sku, src.startsWith('data:') ? loadImageSrc(src) : loadImage(src));
   }
   const loaded = new Map();
   for (const [sku, promise] of urls) loaded.set(sku, await promise);
@@ -354,6 +432,7 @@ export async function renderBlueprint(layout, products, opts = {}) {
 // orden que la lista PRODUCT #N del prompt. Sin texto ni números: cualquier
 // texto en una referencia acaba filtrándose a la imagen generada.
 export async function renderContactSheet(products, opts = {}) {
+  const metrics = opts.metrics || null;
   const list = (products || []).filter(p => p?.img);
   if (!list.length) return null;
 
@@ -369,7 +448,10 @@ export async function renderContactSheet(products, opts = {}) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  const imgs = await Promise.all(list.map(p => loadImage(p.img)));
+  const imgs = await Promise.all(list.map(p => {
+    const src = metricOf(metrics, p.sku)?.src || p.img;
+    return src.startsWith('data:') ? loadImageSrc(src) : loadImage(src);
+  }));
   const PAD = Math.round(cell * 0.06);
   imgs.forEach((img, i) => {
     if (!img) return;

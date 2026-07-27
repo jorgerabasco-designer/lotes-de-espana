@@ -355,19 +355,26 @@ export default function App() {
   };
 
   // Vuelve a generar el bodegón aplicando la maqueta y las correcciones.
-  const handleEditorApply = ({ layout, instrucciones }) => {
+  //
+  // El orden importa para que no parpadee: primero se arranca la generación
+  // nueva (que ya deja el overlay abierto en "generando"), y solo entonces se
+  // cierra el editor y se tira el bodegón viejo. Antes se cerraba todo primero
+  // y aparecía una ventana nueva unos segundos después, sin nada en medio.
+  const handleEditorApply = async ({ layout, instrucciones }) => {
     const gen = editorGen;
     if (!gen) return;
-    setEditorGen(null);
     const { items, title, description, tags } = gen;
     const oldRef = gen.ref;
-    removeGen(oldRef);
-    setViewingRef(null);
-    discardBodegon(oldRef).catch(() => {});
-    setTimeout(() => startBodegon({
-      items, title, description, tags,
-      layout, instrucciones, layoutEditado: true,
-    }), 50);
+    try {
+      await startBodegon({
+        items, title, description, tags,
+        layout, instrucciones, layoutEditado: true,
+      });
+    } finally {
+      setEditorGen(null);
+      removeGen(oldRef);
+      discardBodegon(oldRef).catch(() => {});
+    }
   };
   const handleOverlaySave = async () => {
     const gen = viewingGen;
