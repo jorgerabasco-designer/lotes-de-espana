@@ -65,7 +65,7 @@ function bucketLabel(d) {
   return d === 0 ? 'Hoy' : d === 1 ? 'Ayer' : d <= 6 ? 'Esta semana' : d <= 30 ? 'Este mes' : 'Anteriores';
 }
 
-export default function HistoryScreen({ products, history, activeGens = [], onRename, onDelete, onRefresh, onEdit, onViewGen }) {
+export default function HistoryScreen({ products, history, activeGens = [], onRename, onDelete, onRefresh, onEdit, onEditLayout, onViewGen }) {
   const { tagLabels } = useTaxonomy();
   const [range, setRange] = useState('all');
   const [q, setQ] = useState('');
@@ -437,6 +437,13 @@ export default function HistoryScreen({ products, history, activeGens = [], onRe
                     className="hbtn"
                     onClick={() => { onEdit(lightbox); setLightbox(null); }}
                   >{I.edit({ size: 13 })} Editar productos</button>
+                )}
+                {onEditLayout && (
+                  <button
+                    className="hbtn"
+                    onClick={() => { onEditLayout(lightbox); setLightbox(null); }}
+                    title="Recolocar los productos y volver a generar. El bodegón actual se conserva."
+                  >{I.expand({ size: 13 })} Editar composición</button>
                 )}
                 <button className="hbtn primary" onClick={()=>openDownload(lightbox)}>{I.download({ size: 13 })} Descargar</button>
               </div>

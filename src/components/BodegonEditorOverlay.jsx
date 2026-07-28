@@ -10,11 +10,14 @@ import { autoLayout, loadMetrics, normalizeLayoutToImages, MASK, isJamon } from 
 // maqueta se le manda al modelo como plano vinculante, junto con las
 // correcciones que escriba.
 //
-// Reglas de interacción (pensadas para que no haya forma de estropear nada):
-//   · Arrastrar   → mueve el producto.
-//   · Tirador ↘   → escala PROPORCIONAL (nunca se deforma un producto).
-//   · Tirador ↻   → gira (el jamón va en diagonal).
-//   · Flechas     → mueven el seleccionado píxel a píxel.
+// Reglas de interacción:
+//   · Arrastrar          → mueve el producto.
+//   · Círculos (esquinas)→ más grande / más pequeño, SIN deformar.
+//   · Cuadrados (lados)  → transformación libre: estiran solo en ese sentido.
+//                          Deforman el producto a propósito (lo pidió el
+//                          cliente), y se avisa con un % para que se vea.
+//   · Flechas            → mueven el seleccionado píxel a píxel.
+//   · El giro va en la barra de abajo: solo hace falta para los jamones.
 //
 // Props:
 //   open, gen ({ ref, title, items, image, layout }), products
@@ -114,12 +117,29 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
       const cx = rect.left + (orig.x + orig.w / 2) * rect.width;
       const cy = rect.top + (orig.y + orig.h / 2) * rect.height;
       if (mode === 'scale') {
-        // Escala por distancia al centro: proporcional y sin importar el giro.
+        // Esquinas: escala por distancia al centro. Proporcional (nunca
+        // deforma) y da igual el giro que tenga el producto.
         const dist = Math.hypot(e.clientX - cx, e.clientY - cy);
         const k = clamp(dist / (st.startDist || 1), 0.15, 6);
         const w = clamp(orig.w * k, 0.02, 1.6);
         const h = orig.h * (w / orig.w);
         return { ...it, w, h, x: orig.x + orig.w / 2 - w / 2, y: orig.y + orig.h / 2 - h / 2 };
+      }
+      if (mode === 'scaleX' || mode === 'scaleY') {
+        // Laterales: deforman (transformación libre). Se mide sobre el eje
+        // PROPIO del producto, así funciona igual aunque esté girado.
+        const a = (-(orig.rot || 0) * Math.PI) / 180;
+        const vx = e.clientX - cx, vy = e.clientY - cy;
+        const lx = vx * Math.cos(a) - vy * Math.sin(a);
+        const ly = vx * Math.sin(a) + vy * Math.cos(a);
+        if (mode === 'scaleX') {
+          const k = clamp(Math.abs(lx) / (Math.abs(st.startLocalX) || 1), 0.15, 6);
+          const w = clamp(orig.w * k, 0.02, 1.6);
+          return { ...it, w, x: orig.x + orig.w / 2 - w / 2 };
+        }
+        const k = clamp(Math.abs(ly) / (Math.abs(st.startLocalY) || 1), 0.15, 6);
+        const h = clamp(orig.h * k, 0.02, 1.6);
+        return { ...it, h, y: orig.y + orig.h / 2 - h / 2 };
       }
       if (mode === 'rotate') {
         const ang = Math.atan2(e.clientY - cy, e.clientX - cx);
@@ -190,12 +210,19 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
     const orig = items[idx];
     const cx = rect.left + (orig.x + orig.w / 2) * rect.width;
     const cy = rect.top + (orig.y + orig.h / 2) * rect.height;
+    // Posición del puntero en el eje propio del producto (deshaciendo el giro):
+    // hace falta para que los tiradores laterales escalen bien aunque esté
+    // girado, y para que no pegue un salto al agarrarlos.
+    const a = (-(orig.rot || 0) * Math.PI) / 180;
+    const vx = e.clientX - cx, vy = e.clientY - cy;
     dragState.current = {
       idx, mode, rect, orig,
       startX: e.clientX,
       startY: e.clientY,
-      startDist: Math.hypot(e.clientX - cx, e.clientY - cy),
-      startAngle: Math.atan2(e.clientY - cy, e.clientX - cx),
+      startDist: Math.hypot(vx, vy),
+      startAngle: Math.atan2(vy, vx),
+      startLocalX: vx * Math.cos(a) - vy * Math.sin(a),
+      startLocalY: vx * Math.sin(a) + vy * Math.cos(a),
     };
     setSel(idx);
     window.addEventListener('pointermove', onPointerMove);
@@ -231,6 +258,20 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   const bringFront = () => setItems(l => l.map((it, i) => i === sel ? { ...it, z: maxZ + 1 } : it));
   const sendBack  = () => setItems(l => l.map((it, i) => i === sel ? { ...it, z: minZ - 1 } : it));
   const rotateSel = (deg) => setItems(l => l.map((it, i) => i === sel ? { ...it, rot: (it.rot || 0) + deg } : it));
+
+  // Cuánto se ha deformado un producto respecto a su foto real (0 = intacto).
+  const distortionOf = (it) => {
+    const ratio = metricsRef.current.get(it?.sku)?.ratio;
+    if (!it || !ratio || !isFinite(ratio)) return 0;
+    return ((it.w * 2048) / (it.h * 1536)) / ratio - 1;
+  };
+  const restoreProportion = () => setItems(l => l.map((it, i) => {
+    if (i !== sel) return it;
+    const ratio = metricsRef.current.get(it.sku)?.ratio;
+    if (!ratio || !isFinite(ratio)) return it;
+    const w = (it.h * 1536 * ratio) / 2048;
+    return { ...it, w, x: it.x + it.w / 2 - w / 2 };
+  }));
 
   // Duplicar = una unidad más de ese producto en la foto. Quitar = una menos.
   // La cantidad que se le pide a la IA sale de la maqueta, así que las dos
@@ -280,8 +321,9 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
           <div className="bed-head">
             <div className="bed-eye">Editar composición</div>
             <div className="bed-hint">
-              Arrastra los productos para colocarlos. Al seleccionar uno salen cuatro puntos en las
-              esquinas: tira de ellos para hacerlo más grande o más pequeño.
+              Arrastra los productos para colocarlos. Al seleccionar uno salen tiradores:
+              los <strong>redondos de las esquinas</strong> lo hacen más grande o más pequeño sin
+              deformarlo; los <strong>cuadrados de los lados</strong> lo estiran solo en ese sentido.
             </div>
           </div>
 
@@ -339,12 +381,22 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
                     transform: `rotate(${selItem.rot || 0}deg)`,
                   }}
                 >
+                  {/* Esquinas: mantienen la proporción. */}
                   {['nw', 'ne', 'sw', 'se'].map(corner => (
                     <span
                       key={corner}
                       className={`bed-handle bed-${corner}`}
                       onPointerDown={(e) => startDrag(e, sel, 'scale')}
-                      title="Arrastra para hacerlo más grande o más pequeño"
+                      title="Más grande o más pequeño, sin deformar"
+                    />
+                  ))}
+                  {/* Laterales: transformación libre (deforman el producto). */}
+                  {[['w', 'scaleX'], ['e', 'scaleX'], ['n', 'scaleY'], ['s', 'scaleY']].map(([side, mode]) => (
+                    <span
+                      key={side}
+                      className={`bed-handle bed-free bed-${side}`}
+                      onPointerDown={(e) => startDrag(e, sel, mode)}
+                      title="Estirar solo en este sentido (deforma el producto)"
                     />
                   ))}
                 </div>
@@ -391,6 +443,11 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
                   {selProduct.brand || selProduct.sku}
                   {selProduct.h ? ` · ${selProduct.h}×${selProduct.w}×${selProduct.d} cm` : ''}
                 </div>
+                {Math.abs(distortionOf(selItem)) > 0.05 && (
+                  <button className="bed-warn" onClick={restoreProportion}>
+                    Deformado un {Math.abs(Math.round(distortionOf(selItem) * 100))}% · restaurar proporción
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -453,6 +510,13 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         .bed-ne{right:-8px;top:-8px;cursor:nesw-resize}
         .bed-sw{left:-8px;bottom:-8px;cursor:nesw-resize}
         .bed-se{right:-8px;bottom:-8px;cursor:nwse-resize}
+        /* Laterales (deforman): cuadrados y más discretos, para distinguirlos
+           a simple vista de las esquinas, que sí respetan la proporción. */
+        .bed-free{border-radius:3px;width:12px;height:12px;border-color:var(--muted)}
+        .bed-w{left:-7px;top:50%;margin-top:-6px;cursor:ew-resize}
+        .bed-e{right:-7px;top:50%;margin-top:-6px;cursor:ew-resize}
+        .bed-n{top:-7px;left:50%;margin-left:-6px;cursor:ns-resize}
+        .bed-s{bottom:-7px;left:50%;margin-left:-6px;cursor:ns-resize}
 
         .bed-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:14px 26px 18px}
         .bed-tool{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;background:#fff;border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .12s}
@@ -471,6 +535,8 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         .bed-selinfo{min-width:0}
         .bed-seln{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.25}
         .bed-selm{font-size:11px;color:var(--muted);margin-top:2px}
+        .bed-warn{margin-top:6px;font-family:inherit;font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:99px;padding:3px 9px;cursor:pointer;text-align:left;line-height:1.3}
+        .bed-warn:hover{background:var(--accent);color:#fff}
 
         .bed-section-h{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:22px 0 8px}
         .bed-notes{width:100%;font-family:inherit;font-size:12.5px;color:var(--ink);line-height:1.5;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 12px;resize:vertical;outline:none;transition:all .15s}

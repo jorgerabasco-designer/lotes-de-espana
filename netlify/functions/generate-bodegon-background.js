@@ -315,7 +315,12 @@ function isJamon(product) {
 // Explica el papel de cada imagen adjunta. Antes mandábamos una foto por
 // producto y el modelo se saturaba (máx. ~6 en alta fidelidad, 14 absoluto);
 // ahora van, por este orden: maqueta, hoja de contactos y hasta 4 protagonistas.
-function buildImageGuide({ hasBlueprint, strictLayout, hasSheet, heroNames }) {
+// `humanLayout` = la maqueta la ha colocado una persona (no es la automática).
+// La maqueta SIEMPRE manda, ya desde la primera generación: cuando se mandaba
+// como mera sugerencia, el modelo recomponía a su aire y de paso se inventaba
+// productos; y al editar después, la foto no se parecía a la maqueta, así que
+// había que recolocarlo todo desde cero.
+function buildImageGuide({ hasBlueprint, humanLayout, hasSheet, heroNames }) {
   const lines = [];
   lines.push('================================================================');
   lines.push('ATTACHED IMAGES — what each one is for');
@@ -327,16 +332,16 @@ function buildImageGuide({ hasBlueprint, strictLayout, hasSheet, heroNames }) {
     lines.push(`IMAGE #${n} — COMPOSITION BLUEPRINT (layout map).`);
     lines.push('  A flat cut-out mock-up of the hamper: every product already');
     lines.push('  placed where it must appear, at its correct relative size.');
-    if (strictLayout) {
-      lines.push('  A HUMAN OPERATOR ARRANGED THIS BY HAND. It is a binding');
-      lines.push('  instruction, not a suggestion. Reproduce the SAME products in');
-      lines.push('  the SAME positions, at the SAME relative sizes and the SAME');
-      lines.push('  overlap order. Do NOT rearrange, re-sort, re-scale, add or');
-      lines.push('  remove anything. If your composition would place an item');
-      lines.push('  somewhere else, you are wrong — follow the blueprint.');
-    } else {
-      lines.push('  Use it as the guide for placement and RELATIVE SIZES. Keep the');
-      lines.push('  same tier structure and the same size relationships.');
+    lines.push('  THIS IS A BINDING INSTRUCTION, NOT A SUGGESTION. Reproduce the');
+    lines.push('  SAME products in the SAME positions, at the SAME relative sizes');
+    lines.push('  and the SAME overlap order. Do NOT rearrange, re-sort, re-scale,');
+    lines.push('  add or remove anything. If your composition would place an item');
+    lines.push('  somewhere else, you are wrong — follow the blueprint.');
+    lines.push('  Every product that must appear is already in this blueprint, and');
+    lines.push('  nothing else may appear. Never invent, substitute or add items.');
+    if (humanLayout) {
+      lines.push('  A HUMAN OPERATOR ARRANGED THIS BY HAND, product by product,');
+      lines.push('  after a previous attempt got it wrong. Do not "improve" it.');
     }
     lines.push('  Your job is to turn this flat mock-up into a REAL PHOTOGRAPH:');
     lines.push('  add studio lighting, soft contact shadows, correct perspective');
@@ -377,17 +382,17 @@ const STRICT_LAYOUT_OVERRIDE = `
 ================================================================
 THE BLUEPRINT OVERRIDES THE COMPOSITION RULES
 ================================================================
-A human operator arranged IMAGE #1 by hand, product by product.
 Wherever the general composition guidance above (tier structure,
 lateral spread, 3-layer limit, framing percentages, symmetry)
-disagrees with that blueprint, THE BLUEPRINT WINS.
+disagrees with the blueprint in IMAGE #1, THE BLUEPRINT WINS.
 
 Keep every product at the position, the scale and the overlap order
 shown in the blueprint. You still decide lighting, shadows,
 perspective realism and material rendering — nothing else.
 
-Do not "improve" their arrangement. They arranged it that way on
-purpose, after the previous attempt got it wrong.`;
+Do not "improve" the arrangement. The operator will review this
+image next to the blueprint, and any product that moved, changed
+size or appeared out of nowhere counts as a failed generation.`;
 
 // Correcciones escritas por el usuario tras ver una generación anterior.
 // Van al final del prompt, que es donde más peso tienen.
@@ -631,7 +636,7 @@ export const handler = async (event) => {
   // 5) Construir prompt
   const imageGuide = buildImageGuide({
     hasBlueprint: !!blueprint,
-    strictLayout: !!bod.layout_editado,
+    humanLayout: !!bod.layout_editado,
     hasSheet: !!sheet,
     heroNames,
   });
@@ -641,7 +646,7 @@ export const handler = async (event) => {
     + '\n\n' + imageGuide
     + '\n\n' + STRUCTURE_RULES
     + '\n\n' + QUANTITY_RULES.replace(/\{N\}/g, String(totalUnits))
-    + (bod.layout_editado ? '\n\n' + STRICT_LAYOUT_OVERRIDE : '')
+    + (blueprint ? '\n\n' + STRICT_LAYOUT_OVERRIDE : '')
     + buildCorrections(bod.instrucciones);
 
   // Guardar el prompt usado (para referencia) y mantener estado 'generating'

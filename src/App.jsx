@@ -354,6 +354,23 @@ export default function App() {
     if (viewingGen) setEditorGen(viewingGen);
   };
 
+  // Editar la composición de un bodegón ya guardado en el historial. El
+  // original NO se borra: se genera uno nuevo y ellas deciden cuál se quedan.
+  const handleEditHistoryLayout = (b) => {
+    if (!b) return;
+    setEditorGen({
+      ref: b.id,
+      title: b.title,
+      description: b.description || '',
+      tags: b.tags || [],
+      items: b.items || (b.skus || []).map(s => ({ sku: s, qty: 1 })),
+      image: b.image,
+      layout: b.layout || null,
+      instrucciones: b.instrucciones || '',
+      fromHistory: true,
+    });
+  };
+
   // Vuelve a generar el bodegón aplicando la maqueta y las correcciones.
   //
   // El orden importa para que no parpadee: primero se arranca la generación
@@ -372,8 +389,12 @@ export default function App() {
       });
     } finally {
       setEditorGen(null);
-      removeGen(oldRef);
-      discardBodegon(oldRef).catch(() => {});
+      // Si venía del historial, el bodegón guardado se conserva: el nuevo se
+      // añade aparte y ya deciden ellas con cuál se quedan.
+      if (!gen.fromHistory) {
+        removeGen(oldRef);
+        discardBodegon(oldRef).catch(() => {});
+      }
     }
   };
   const handleOverlaySave = async () => {
@@ -553,6 +574,7 @@ export default function App() {
           onDelete={handleDeletedBodegon}
           onRefresh={refreshHistory}
           onEdit={(b) => setEditBodegon(b)}
+          onEditLayout={handleEditHistoryLayout}
           onViewGen={handleViewGen}
         />
       )}
