@@ -261,12 +261,72 @@ function drawSizeCm(p, metrics) {
   return { box: { w: vis.w / fx, h: vis.h / fy }, vis, trim };
 }
 
+// Saca la ESTRUCTURA de una composición real a partir de las cajas detectadas
+// en la foto de un lote (ver netlify/functions/analyze-lote.js).
+//
+// No se copian las cajas una a una — el lote de referencia tiene otros
+// productos y en otra cantidad. Lo que se copia es lo que de verdad define el
+// aspecto de la composición: cuánto ocupa, en cuántas alturas se reparte, a qué
+// altura apoya cada una y hasta dónde se abre a lo ancho.
+export function structureFromSlots(slots) {
+  const list = (slots || []).filter(s => s && isFinite(s.x) && isFinite(s.y));
+  if (list.length < 2) return null;
+
+  // Repartir en hasta 3 alturas cortando por los dos huecos más grandes entre
+  // las bases de los productos.
+  const withBottom = list.map(s => ({ ...s, bottom: s.y + s.h })).sort((a, b) => a.bottom - b.bottom);
+  const gaps = [];
+  for (let i = 1; i < withBottom.length; i++) {
+    gaps.push({ i, size: withBottom[i].bottom - withBottom[i - 1].bottom });
+  }
+  const cuts = gaps.sort((a, b) => b.size - a.size).slice(0, 2).map(g => g.i).sort((a, b) => a - b);
+
+  const groups = [];
+  let start = 0;
+  for (const c of [...cuts, withBottom.length]) {
+    if (c > start) groups.push(withBottom.slice(start, c));
+    start = c;
+  }
+  while (groups.length > 3) {           // por si acaso
+    const last = groups.pop();
+    groups[groups.length - 1].push(...last);
+  }
+
+  const names = groups.length >= 3
+    ? ['TRASERA', 'MEDIA', 'DELANTERA']
+    : (groups.length === 2 ? ['TRASERA', 'DELANTERA'] : ['MEDIA']);
+
+  const baselines = {};
+  const extents = {};
+  groups.forEach((g, i) => {
+    const name = names[i];
+    if (!name) return;
+    baselines[name] = Math.min(0.995, Math.max(...g.map(s => s.bottom)));
+    extents[name] = {
+      min: Math.max(0, Math.min(...g.map(s => s.x))),
+      max: Math.min(1, Math.max(...g.map(s => s.x + s.w))),
+    };
+  });
+  // Si la foto solo daba 1 o 2 alturas, se completan las que falten.
+  if (!baselines.TRASERA) baselines.TRASERA = (baselines.MEDIA || 0.8) - 0.10;
+  if (!baselines.MEDIA) baselines.MEDIA = (baselines.TRASERA + (baselines.DELANTERA ?? 0.98)) / 2;
+  if (!baselines.DELANTERA) baselines.DELANTERA = Math.min(0.995, baselines.MEDIA + 0.09);
+
+  // Escala: el producto más alto de la referencia marca cuánto ocupa el
+  // conjunto. Se recorta a un rango sensato por si la detección se pasa.
+  const tallestFrac = Math.min(0.75, Math.max(0.30, Math.max(...list.map(s => s.h))));
+
+  return { baselines, extents, tallestFrac, n: list.length };
+}
+
 // Coloca los productos en tres alturas (trasera / media / delantera) usando sus
 // medidas reales, de forma parecida a como se monta una cesta de verdad.
 // `entries` = [{ product, qty }] — cada unidad se coloca por separado.
 // `metrics` (opcional) = medidas de las fotos (loadMetrics), para no deformar
 // nada y para descontar el aire de los recortes.
-export function autoLayout(entries, metrics) {
+// `ref` (opcional) = estructura sacada de un lote real (structureFromSlots):
+// si viene, la composición imita la de ese lote.
+export function autoLayout(entries, metrics, ref = null) {
   const units = [];
   for (const { product, qty } of entries) {
     for (let i = 0; i < (qty || 1); i++) units.push(product);
@@ -280,7 +340,8 @@ export function autoLayout(entries, metrics) {
   // largos, no altos, y si entraran aplastarían al resto de la composición.
   const forScale = units.filter(u => !isJamon(u));
   const tallestCm = Math.max(...(forScale.length ? forScale : units).map(u => sizeCm.get(u).vis.h), 1);
-  const pxPerCm = (CANVAS_H * TALLEST_FRAC) / tallestCm;
+  const tallestFrac = ref?.tallestFrac || TALLEST_FRAC;
+  const pxPerCm = (CANVAS_H * tallestFrac) / tallestCm;
 
   const rows = { TRASERA: [], MEDIA: [], DELANTERA: [] };
   const jamones = [];
@@ -314,12 +375,17 @@ export function autoLayout(entries, metrics) {
 
     const OVERLAP = tier === 'TRASERA' ? 0.04 : 0.10; // solape lateral
     let total = sizes.reduce((s, it) => s + it.visW, 0) * (1 - OVERLAP);
-    const maxW = CANVAS_W * ROW_MAX_W;
+    // Con lote de referencia, cada altura se abre lo mismo que se abría allí
+    // y apoya donde apoyaba; si no, se usan los valores por defecto.
+    const ext = ref?.extents?.[tier];
+    const anchoDisponible = ext ? (ext.max - ext.min) : ROW_MAX_W;
+    const centro = ext ? (ext.min + ext.max) / 2 : 0.5;
+    const maxW = CANVAS_W * Math.max(0.25, anchoDisponible);
     const shrink = total > maxW ? maxW / total : 1;
     total *= shrink;
 
-    let x = (CANVAS_W - total) / 2;   // x = borde izquierdo VISIBLE del siguiente
-    const baseY = CANVAS_H * BASELINE[tier];
+    let x = centro * CANVAS_W - total / 2;   // x = borde izquierdo VISIBLE del siguiente
+    const baseY = CANVAS_H * (ref?.baselines?.[tier] ?? BASELINE[tier]);
 
     for (const { p, trim, boxW, boxH, visW } of sizes) {
       const bw = boxW * shrink;
@@ -350,10 +416,11 @@ export function autoLayout(entries, metrics) {
     const maxVis = CANVAS_W * 0.50;
     const visW = vis.w * pxPerCm;
     if (visW > maxVis) { const k = maxVis / visW; dw *= k; dh *= k; }
+    const baseJamon = (ref?.baselines?.DELANTERA ?? BASELINE.DELANTERA) - 0.08;
     items.push({
       sku: p.sku,
       x: (CANVAS_W * (0.50 + i * 0.06) - dw / 2) / CANVAS_W,
-      y: (CANVAS_H * 0.90 - dh / 2) / CANVAS_H,
+      y: (CANVAS_H * baseJamon - dh / 2) / CANVAS_H,
       w: dw / CANVAS_W,
       h: dh / CANVAS_H,
       rot: -28,        // diagonal con la pezuña arriba a la derecha
