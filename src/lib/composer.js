@@ -308,15 +308,35 @@ export function structureFromSlots(slots) {
     };
   });
   // Si la foto solo daba 1 o 2 alturas, se completan las que falten.
-  if (!baselines.TRASERA) baselines.TRASERA = (baselines.MEDIA || 0.8) - 0.10;
+  if (!baselines.TRASERA) baselines.TRASERA = (baselines.MEDIA ?? 0.8) - 0.10;
   if (!baselines.MEDIA) baselines.MEDIA = (baselines.TRASERA + (baselines.DELANTERA ?? 0.98)) / 2;
   if (!baselines.DELANTERA) baselines.DELANTERA = Math.min(0.995, baselines.MEDIA + 0.09);
 
-  // Escala: el producto más alto de la referencia marca cuánto ocupa el
-  // conjunto. Se recorta a un rango sensato por si la detección se pasa.
-  const tallestFrac = Math.min(0.75, Math.max(0.30, Math.max(...list.map(s => s.h))));
+  // Las alturas NO se pueden copiar tal cual: dependen de cuántos productos
+  // tenía la foto de referencia. Un lote con 21 productos las reparte por todo
+  // el encuadre, y si trasladamos esas posiciones a un lote de 7 quedan filas
+  // sueltas con huecos vacíos en medio.
+  //
+  // Lo que sí se conserva es la PROPORCIÓN entre separaciones (si la
+  // referencia tenía la fila de atrás muy despegada o muy pegada), pero el
+  // total se comprime al de una cesta densa, que es lo que se busca siempre.
+  const g1 = Math.max(0, baselines.MEDIA - baselines.TRASERA);
+  const g2 = Math.max(0, baselines.DELANTERA - baselines.MEDIA);
+  const totalRef = g1 + g2;
+  const TOTAL = BASELINE.DELANTERA - BASELINE.TRASERA; // separación de una cesta densa
+  const k = totalRef > 0 ? TOTAL / totalRef : 1;
+  const dense = {
+    DELANTERA: BASELINE.DELANTERA,
+    MEDIA: BASELINE.DELANTERA - g2 * k,
+    TRASERA: BASELINE.DELANTERA - (g1 + g2) * k,
+  };
 
-  return { baselines, extents, tallestFrac, n: list.length };
+  // Escala: cuánto ocupaba de alto el producto más grande de la referencia.
+  // Acotada, porque estas fotos traen mucho margen y si se copia a pelo la
+  // composición sale diminuta dentro del encuadre.
+  const tallestFrac = Math.min(0.68, Math.max(0.45, Math.max(...list.map(s => s.h))));
+
+  return { baselines: dense, extents, tallestFrac, n: list.length };
 }
 
 // Coloca los productos en tres alturas (trasera / media / delantera) usando sus
