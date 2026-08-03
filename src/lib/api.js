@@ -257,6 +257,21 @@ export async function commitBodegon(ref, patch = {}) {
   return rowToBodegon(data);
 }
 
+// Borra de Storage TODO lo que genera un bodegón: la imagen, la maqueta y la
+// hoja de contactos. Las dos últimas tienen nombre fijo por ref, así que no
+// hace falta leerlas de la fila (que puede ser de antes de que existieran).
+// `rows` = [{ ref, imagen_path }]
+async function removeBodegonAssets(rows) {
+  const paths = [];
+  for (const r of rows || []) {
+    if (!r?.ref) continue;
+    paths.push(`${r.ref}_blueprint.jpg`, `${r.ref}_sheet.jpg`);
+    if (r.imagen_path) paths.push(r.imagen_path);
+  }
+  if (!paths.length) return;
+  await supabase.storage.from('bodegones').remove(paths).catch(() => {});
+}
+
 // Borra un bodegón y, si tiene imagen, su fichero en Storage.
 export async function discardBodegon(ref) {
   if (!SUPABASE_READY) return true;
@@ -265,12 +280,7 @@ export async function discardBodegon(ref) {
     .select('imagen_path')
     .eq('ref', ref)
     .maybeSingle();
-  // Se borran también la maqueta y la hoja de contactos: al regenerar varias
-  // veces se acumularían en Storage. Los nombres son fijos por ref, así que no
-  // hace falta leerlos de la fila (que puede no tener aún esas columnas).
-  const basura = [`${ref}_blueprint.jpg`, `${ref}_sheet.jpg`];
-  if (row?.imagen_path) basura.push(row.imagen_path);
-  await supabase.storage.from('bodegones').remove(basura).catch(() => {});
+  await removeBodegonAssets([{ ref, imagen_path: row?.imagen_path }]);
   await supabase.from('bodegones').delete().eq('ref', ref);
   return true;
 }
@@ -279,10 +289,7 @@ export async function discardBodegon(ref) {
 export async function clearAllBodegones() {
   if (!SUPABASE_READY) return 0;
   const { data: rows } = await supabase.from('bodegones').select('ref, imagen_path');
-  const paths = (rows || []).map(r => r.imagen_path).filter(Boolean);
-  if (paths.length) {
-    await supabase.storage.from('bodegones').remove(paths).catch(() => {});
-  }
+  await removeBodegonAssets(rows || []);
   const { error } = await supabase
     .from('bodegones')
     .delete()
@@ -305,6 +312,12 @@ export async function updateBodegon(id, patch) {
 
 export async function deleteBodegon(id) {
   if (!SUPABASE_READY) return true;
+  const { data: row } = await supabase
+    .from('bodegones')
+    .select('imagen_path')
+    .eq('ref', id)
+    .maybeSingle();
+  await removeBodegonAssets([{ ref: id, imagen_path: row?.imagen_path }]);
   const { error } = await supabase.from('bodegones').delete().eq('ref', id);
   if (error) throw error;
   return true;
