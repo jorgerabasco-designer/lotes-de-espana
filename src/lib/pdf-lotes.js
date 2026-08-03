@@ -32,11 +32,23 @@ const MAX_LONG_SIDE = 2500;
 
 // Toma un canvas y devuelve un {canvas, dataUrl, width, height} con la imagen
 // redimensionada si supera MAX_LONG_SIDE. Preserva el aspect ratio.
-function encodeCanvas(canvas) {
+// Calidad de las imágenes del PDF de ETIQUETAS.
+//
+// Ojo: NO se toca la del PDF QR — su calidad la validó el cliente y va aparte.
+//
+// Cada etiqueta se imprime a 89 mm de ancho (rejilla 2×2 en A4). Con 1400 px
+// eso son 400 ppp, por encima de calidad de imprenta. Los 2500 px que se
+// usaban antes son 714 ppp: invisibles en papel, pero hacían que un lote de
+// 27 etiquetas pesara 21 MB y la clienta no pudiera subirlo a su web.
+const ETIQUETA_IMG = { maxSide: 1400, quality: 0.82 };
+
+function encodeCanvas(canvas, opts = {}) {
+  const maxLongSide = opts.maxSide ?? MAX_LONG_SIDE;
+  const quality = opts.quality ?? JPEG_QUALITY;
   const w = canvas.width, h = canvas.height;
   const longSide = Math.max(w, h);
-  if (longSide > MAX_LONG_SIDE) {
-    const scale = MAX_LONG_SIDE / longSide;
+  if (longSide > maxLongSide) {
+    const scale = maxLongSide / longSide;
     const dw = Math.round(w * scale);
     const dh = Math.round(h * scale);
     const out = document.createElement('canvas');
@@ -45,15 +57,17 @@ function encodeCanvas(canvas) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(canvas, 0, 0, dw, dh);
-    return { dataUrl: out.toDataURL('image/jpeg', JPEG_QUALITY), width: dw, height: dh };
+    return { dataUrl: out.toDataURL('image/jpeg', quality), width: dw, height: dh };
   }
-  return { dataUrl: canvas.toDataURL('image/jpeg', JPEG_QUALITY), width: w, height: h };
+  return { dataUrl: canvas.toDataURL('image/jpeg', quality), width: w, height: h };
 }
 
 // Descarga una imagen/PDF de una URL, devuelve un objeto con:
 //   { type: 'image'|'pdf'|null, dataUrl, width, height }
 // Para PDF renderiza la primera página a un canvas.
-async function fetchAsRenderable(url) {
+// `opts` = { maxSide, quality } para bajar la calidad solo donde interese
+// (las etiquetas). Sin opts, se usa la calidad alta de siempre.
+async function fetchAsRenderable(url, opts = {}) {
   if (!url) return null;
   const res = await fetch(url);
   if (!res.ok) return null;
@@ -70,7 +84,7 @@ async function fetchAsRenderable(url) {
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    const enc = encodeCanvas(canvas);
+    const enc = encodeCanvas(canvas, opts);
     return { type: 'pdf', dataUrl: enc.dataUrl, width: enc.width, height: enc.height };
   }
   // Imagen normal → carga en un Image para saber dimensiones
@@ -82,7 +96,7 @@ async function fetchAsRenderable(url) {
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       canvas.getContext('2d').drawImage(img, 0, 0);
-      const enc = encodeCanvas(canvas);
+      const enc = encodeCanvas(canvas, opts);
       URL.revokeObjectURL(objectUrl);
       resolve({ type: 'image', dataUrl: enc.dataUrl, width: enc.width, height: enc.height });
     };
@@ -301,7 +315,7 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
 
     // Imagen: ocupa (casi) toda la celda por debajo del titulillo.
     const imgAreaY = cellY + cellTitleH;
-    const rendered = await fetchAsRenderable(p.url);
+    const rendered = await fetchAsRenderable(p.url, ETIQUETA_IMG);
     if (rendered) {
       const ratio = rendered.width / rendered.height;
       let drawW = cellW, drawH = cellW / ratio;
