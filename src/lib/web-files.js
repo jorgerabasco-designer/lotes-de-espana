@@ -11,6 +11,7 @@
 //                 nuevo).
 
 import { supabase, SUPABASE_READY, publicUrl } from './supabase.js';
+import { fitWebImage, FitWebImageError } from './fitWebImage.js';
 
 const BUCKET_ETIQUETAS = 'etiquetas';
 const BUCKET_LOTES     = 'lotes';
@@ -66,7 +67,9 @@ export function extractLoteNumberFromFilename(name) {
 
 // Extensiones aceptadas por subida.
 export const ALLOWED_LABEL_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'pdf'];
-export const ALLOWED_LOTE_EXTS  = ['png', 'jpg', 'jpeg', 'webp', 'pdf'];
+// Sin PDF: una foto de lote tiene que acabar siendo un JPEG de 700×800, y un
+// PDF no se puede convertir a eso en el navegador.
+export const ALLOWED_LOTE_EXTS  = ['png', 'jpg', 'jpeg', 'webp'];
 export const ALLOWED_EXCEL_EXTS = ['xlsx', 'xlsm', 'xls'];
 
 // ---------- ETIQUETAS ----------
@@ -175,19 +178,42 @@ export async function uploadLotePhoto(file) {
   if (!SUPABASE_READY) return { ok: false, error: 'Supabase no está conectado.' };
   const ext = extOf(file.name);
   if (!ALLOWED_LOTE_EXTS.includes(ext)) {
-    return { ok: false, error: `Formato no soportado (.${ext}). Usa PNG, JPG, WEBP o PDF.` };
+    // El TIFF es el caso habitual (viene así de algunas cámaras) y el
+    // navegador no sabe abrirlo, así que se explica qué hacer.
+    if (ext === 'tif' || ext === 'tiff') {
+      return { ok: false, error: `Los archivos TIFF (.${ext}) no se pueden procesar en el navegador. Convierte la imagen a JPG o PNG antes de subirla.` };
+    }
+    return { ok: false, error: `Formato no soportado (.${ext}). Usa JPG, PNG o WEBP.` };
   }
   const num = extractLoteNumberFromFilename(file.name);
   if (!num) {
     return { ok: false, error: `El nombre "${file.name}" no contiene un número de lote (necesita al menos un grupo de dígitos, ej. 216_001.jpg).` };
   }
-  const path = `${num}_001.${ext}`;
+
+  // REGLA DE NEGOCIO: una foto de lote SIEMPRE entra a 700×800.
+  //
+  // Antes se subía el fichero tal cual y se colaron 20 fotos directas de
+  // cámara (hasta 5388×4000 y 10 MB) cuando en el PDF se imprimen a 105 mm.
+  // fitWebImage encaja la foto completa en 700×800 con fondo blanco: ni
+  // recorta, ni deforma, y respeta la orientación EXIF.
+  const path = `${num}_001.jpg`;
+  let upFile;
+  try {
+    const r = await fitWebImage(file, { name: path });
+    upFile = r.file;
+  } catch (e) {
+    // Errores esperables (TIFF, formato raro, fichero dañado) se devuelven
+    // como mensaje para el usuario, no como excepción.
+    if (e instanceof FitWebImageError) return { ok: false, error: e.message };
+    return { ok: false, error: e?.message || 'No se pudo procesar la imagen.' };
+  }
+
   const { error } = await supabase.storage
     .from(BUCKET_LOTES)
-    .upload(path, file, {
+    .upload(path, upFile, {
       upsert: true,
       cacheControl: '300',
-      contentType: file.type || undefined,
+      contentType: 'image/jpeg',
     });
   if (error) return { ok: false, error: error.message || 'Error subiendo la foto del lote.' };
 
