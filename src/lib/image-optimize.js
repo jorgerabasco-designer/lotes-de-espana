@@ -33,7 +33,11 @@ export async function optimizeImage(file, opts = {}) {
   const hasAlpha = await detectAlpha(bitmap);
 
   let outputType;
-  if (hasAlpha) {
+  if (opts.format) {
+    // Formato forzado por quien llama (las etiquetas se guardan siempre en
+    // JPEG: son fotos, y en PNG ocupaban una barbaridad).
+    outputType = opts.format;
+  } else if (hasAlpha) {
     outputType = 'image/png';
   } else if (await supportsWebp()) {
     outputType = 'image/webp';

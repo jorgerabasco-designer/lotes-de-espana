@@ -12,6 +12,18 @@
 
 import { supabase, SUPABASE_READY, publicUrl } from './supabase.js';
 import { fitWebImage, FitWebImageError } from './fitWebImage.js';
+import { optimizeImage } from './image-optimize.js';
+
+// Tope de resolución de las etiquetas traseras al subirlas.
+//
+// A diferencia de las fotos de lote, aquí NO se fuerza un tamaño fijo: cada
+// etiqueta tiene sus proporciones (unas alargadas, otras cuadradas) y hay que
+// respetarlas. Solo se limita el lado mayor.
+//
+// 1800 px queda holgado por encima de los 1400 px con los que el PDF de
+// etiquetas embebe las imágenes, así que la doble compresión no se nota.
+const ETIQUETA_MAX_SIDE = 1800;
+const ETIQUETA_QUALITY = 0.88;
 
 const BUCKET_ETIQUETAS = 'etiquetas';
 const BUCKET_LOTES     = 'lotes';
@@ -88,15 +100,38 @@ export async function uploadEtiqueta(file) {
   if (!ref) {
     return { ok: false, error: `El nombre "${file.name}" no contiene una referencia válida (formato: 2 dígitos + 2 letras + 3 dígitos, ej. 06AC044).` };
   }
-  const path = `${ref}.${ext}`;
+  // Optimizar antes de subir. Las etiquetas llegaban directas de cámara (media
+  // de 1,4 MB, algunas de 8 MB) y eso lastraba dos cosas: la subida para quien
+  // las carga, y sobre todo la generación del PDF, que se descarga TODAS las
+  // etiquetas del lote cada vez (43 MB para un lote de 27).
+  // Los PDF se dejan intactos: no son fotos.
+  let upFile = file;
+  let finalExt = ext;
+  if (file.type?.startsWith('image/')) {
+    try {
+      const r = await optimizeImage(file, {
+        maxSide: ETIQUETA_MAX_SIDE,
+        quality: ETIQUETA_QUALITY,
+        format: 'image/jpeg',
+      });
+      if (r?.file) {
+        upFile = r.file;
+        finalExt = upFile.type === 'image/jpeg' ? 'jpg' : ext;
+      }
+    } catch (e) {
+      console.warn('[etiquetas] no se pudo optimizar', file.name, e);
+    }
+  }
+
+  const path = `${ref}.${finalExt}`;
   const { error } = await supabase.storage
     .from(BUCKET_ETIQUETAS)
-    .upload(path, file, {
+    .upload(path, upFile, {
       upsert: true,
       // cacheControl bajo (5 min) para que las regeneraciones cercanas a una
       // subida vean la nueva versión aunque nuestro cache-buster fallara.
       cacheControl: '300',
-      contentType: file.type || undefined,
+      contentType: upFile.type || undefined,
     });
   if (error) return { ok: false, error: error.message || 'Error subiendo la etiqueta.' };
 
