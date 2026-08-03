@@ -33,12 +33,7 @@ export async function optimizeImage(file, opts = {}) {
   const hasAlpha = await detectAlpha(bitmap);
 
   let outputType;
-  if (opts.format) {
-    // Formato forzado por quien llama. Se usa en las fotos de lotes: se
-    // descargan en bloque para trabajar con ellas fuera, y un JPEG lo abre
-    // cualquiera sin pensar.
-    outputType = opts.format;
-  } else if (hasAlpha) {
+  if (hasAlpha) {
     outputType = 'image/png';
   } else if (await supportsWebp()) {
     outputType = 'image/webp';

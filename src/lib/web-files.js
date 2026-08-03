@@ -11,7 +11,6 @@
 //                 nuevo).
 
 import { supabase, SUPABASE_READY, publicUrl } from './supabase.js';
-import { optimizeImage } from './image-optimize.js';
 
 const BUCKET_ETIQUETAS = 'etiquetas';
 const BUCKET_LOTES     = 'lotes';
@@ -70,36 +69,6 @@ export const ALLOWED_LABEL_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'pdf'];
 export const ALLOWED_LOTE_EXTS  = ['png', 'jpg', 'jpeg', 'webp', 'pdf'];
 export const ALLOWED_EXCEL_EXTS = ['xlsx', 'xlsm', 'xls'];
 
-// ---------- OPTIMIZACIÓN AL SUBIR ----------
-
-// Lado mayor al que se reducen las imágenes subidas. En los PDFs, la foto del
-// lote se imprime a 105 mm y las etiquetas a media página: con 2000 px sobra
-// de largo. Las fotos que llegan de cámara vienen a 5.400 px y 10 MB, que es
-// peso tirado (y fue lo que se comió la cuota de Supabase).
-const UPLOAD_MAX_SIDE = 2000;
-
-function extFromType(type) {
-  if (type === 'image/jpeg') return 'jpg';
-  if (type === 'image/png') return 'png';
-  if (type === 'image/webp') return 'webp';
-  return null;
-}
-
-// Devuelve { file, ext } ya listos para subir. Los PDF y lo que no sea imagen
-// se dejan intactos. Si la optimización no mejora, se sube el original.
-async function optimizarParaSubir(file, opts = {}) {
-  const original = { file, ext: extOf(file.name) };
-  if (!file?.type?.startsWith('image/')) return original;
-  try {
-    const r = await optimizeImage(file, { maxSide: UPLOAD_MAX_SIDE, ...opts });
-    const out = r?.file || file;
-    return { file: out, ext: extFromType(out.type) || original.ext };
-  } catch (e) {
-    console.warn('[subida] no se pudo optimizar', file.name, e);
-    return original;
-  }
-}
-
 // ---------- ETIQUETAS ----------
 
 // Sube una foto de etiqueta. Devuelve { ok, ref, path, url } o { ok:false, error }.
@@ -116,16 +85,15 @@ export async function uploadEtiqueta(file) {
   if (!ref) {
     return { ok: false, error: `El nombre "${file.name}" no contiene una referencia válida (formato: 2 dígitos + 2 letras + 3 dígitos, ej. 06AC044).` };
   }
-  const { file: upFile, ext: finalExt } = await optimizarParaSubir(file, { quality: 0.88 });
-  const path = `${ref}.${finalExt}`;
+  const path = `${ref}.${ext}`;
   const { error } = await supabase.storage
     .from(BUCKET_ETIQUETAS)
-    .upload(path, upFile, {
+    .upload(path, file, {
       upsert: true,
       // cacheControl bajo (5 min) para que las regeneraciones cercanas a una
       // subida vean la nueva versión aunque nuestro cache-buster fallara.
       cacheControl: '300',
-      contentType: upFile.type || undefined,
+      contentType: file.type || undefined,
     });
   if (error) return { ok: false, error: error.message || 'Error subiendo la etiqueta.' };
 
@@ -213,19 +181,13 @@ export async function uploadLotePhoto(file) {
   if (!num) {
     return { ok: false, error: `El nombre "${file.name}" no contiene un número de lote (necesita al menos un grupo de dígitos, ej. 216_001.jpg).` };
   }
-  // Las fotos de lote se descargan luego en bloque para trabajar con ellas
-  // fuera, así que se fuerza JPEG: lo abre cualquiera sin complicaciones.
-  const { file: upFile, ext: finalExt } = await optimizarParaSubir(file, {
-    quality: 0.9,
-    format: 'image/jpeg',
-  });
-  const path = `${num}_001.${finalExt}`;
+  const path = `${num}_001.${ext}`;
   const { error } = await supabase.storage
     .from(BUCKET_LOTES)
-    .upload(path, upFile, {
+    .upload(path, file, {
       upsert: true,
       cacheControl: '300',
-      contentType: upFile.type || undefined,
+      contentType: file.type || undefined,
     });
   if (error) return { ok: false, error: error.message || 'Error subiendo la foto del lote.' };
 
