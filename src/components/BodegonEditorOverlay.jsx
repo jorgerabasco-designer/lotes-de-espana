@@ -19,10 +19,17 @@ import { autoLayout, loadMetrics, normalizeLayoutToImages, structureFromSlots, M
 //   · Flechas            → mueven el seleccionado píxel a píxel.
 //   · El giro va en la barra de abajo: solo hace falta para los jamones.
 //
+// Dos salidas, y son cosas distintas:
+//   · GUARDAR  → se queda con esta composición tal cual, montada con las fotos
+//                del catálogo. No pasa por la IA, así que ni se recoloca nada
+//                ni se reinventan las etiquetas.
+//   · REGENERAR→ le manda esta maqueta a la IA para que haga una foto de
+//                estudio a partir de ella.
+//
 // Props:
 //   open, gen ({ ref, title, items, image, layout }), products
-//   onClose, onApply({ layout, instrucciones })
-export default function BodegonEditorOverlay({ open, gen, products, onClose, onApply }) {
+//   onClose, onApply({ layout, instrucciones }), onSave({ layout, instrucciones })
+export default function BodegonEditorOverlay({ open, gen, products, onClose, onApply, onSave }) {
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(null);
   const [instrucciones, setInstrucciones] = useState('');
@@ -31,6 +38,7 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   const [showRef, setShowRef] = useState(false);
   const [ready, setReady] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [saving, setSaving] = useState(false);
   // "Parecerse al lote nº ___": se analiza la foto de ese lote real y se
   // recoloca todo imitando su composición.
   const [refLote, setRefLote] = useState('');
@@ -138,14 +146,16 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         const vx = e.clientX - cx, vy = e.clientY - cy;
         const lx = vx * Math.cos(a) - vy * Math.sin(a);
         const ly = vx * Math.sin(a) + vy * Math.cos(a);
+        // `free` deja constancia de que este producto se ha estirado a mano,
+        // para que al reabrir el editor no se le devuelva su proporción.
         if (mode === 'scaleX') {
           const k = clamp(Math.abs(lx) / (Math.abs(st.startLocalX) || 1), 0.15, 6);
           const w = clamp(orig.w * k, 0.02, 1.6);
-          return { ...it, w, x: orig.x + orig.w / 2 - w / 2 };
+          return { ...it, w, x: orig.x + orig.w / 2 - w / 2, free: true };
         }
         const k = clamp(Math.abs(ly) / (Math.abs(st.startLocalY) || 1), 0.15, 6);
         const h = clamp(orig.h * k, 0.02, 1.6);
-        return { ...it, h, y: orig.y + orig.h / 2 - h / 2 };
+        return { ...it, h, y: orig.y + orig.h / 2 - h / 2, free: true };
       }
       if (mode === 'rotate') {
         const ang = Math.atan2(e.clientY - cy, e.clientX - cx);
@@ -186,15 +196,8 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
       if (Math.abs(dx) > halfW || Math.abs(dy) > halfH) continue;
       const m = metricsRef.current.get(it.sku);
       if (!m?.mask) return i; // sin máscara (foto opaca): vale toda la caja
-      // La foto va con object-fit:contain dentro de la caja. Si la caja no
-      // tuviera exactamente su proporción quedarían bandas vacías, así que se
-      // mide sobre la foto de verdad y no sobre la caja.
-      let iw = halfW * 2, ih = halfH * 2;
-      if (m.ratio && isFinite(m.ratio)) {
-        if (iw / ih > m.ratio) iw = ih * m.ratio;
-        else ih = iw / m.ratio;
-      }
-      if (Math.abs(dx) > iw / 2 || Math.abs(dy) > ih / 2) continue;
+      // La foto llena la caja entera, así que la máscara se mide sobre ella.
+      const iw = halfW * 2, ih = halfH * 2;
       const u = Math.min(MASK - 1, Math.max(0, Math.round(((dx + iw / 2) / iw) * (MASK - 1))));
       const v = Math.min(MASK - 1, Math.max(0, Math.round(((dy + ih / 2) / ih) * (MASK - 1))));
       if (m.mask[(v * MASK + u) * 4 + 3] > 12) return i;
@@ -276,7 +279,7 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
     const ratio = metricsRef.current.get(it.sku)?.ratio;
     if (!ratio || !isFinite(ratio)) return it;
     const w = (it.h * 1536 * ratio) / 2048;
-    return { ...it, w, x: it.x + it.w / 2 - w / 2 };
+    return { ...it, w, x: it.x + it.w / 2 - w / 2, free: false };
   }));
 
   // Duplicar = una unidad más de ese producto en la foto. Quitar = una menos.
@@ -331,16 +334,33 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   // Se mantiene el editor abierto (en modo "aplicando") hasta que la nueva
   // generación está en marcha: antes se cerraba al instante y aparecía una
   // ventana nueva unos segundos después, que despistaba.
+  const currentLayout = () => ({ version: 1, canvas: { w: 2048, h: 1536 }, items });
+
   const apply = async () => {
-    if (applying) return;
+    if (applying || saving) return;
     setApplying(true);
     try {
       await onApply?.({
-        layout: { version: 1, canvas: { w: 2048, h: 1536 }, items },
+        layout: currentLayout(),
         instrucciones: instrucciones.trim(),
       });
     } finally {
       setApplying(false);
+    }
+  };
+
+  // Guardar sin pasar por la IA: la composición se monta aquí mismo con las
+  // fotos del catálogo y esa es la foto del bodegón.
+  const save = async () => {
+    if (applying || saving) return;
+    setSaving(true);
+    try {
+      await onSave?.({
+        layout: currentLayout(),
+        instrucciones: instrucciones.trim(),
+      });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -526,12 +546,33 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
           </div>
 
           <div className="bed-actions">
-            <button className="bed-btn bed-btn-ghost" onClick={onClose} disabled={applying}>Cancelar</button>
-            <button className="bed-btn bed-btn-primary" onClick={apply} disabled={!ready || applying}>
-              {applying
-                ? <>Aplicando cambios…</>
-                : <>{I.sparkle({ size: 14 })} Aplicar y regenerar</>}
+            <button
+              className="bed-btn bed-btn-primary"
+              onClick={save}
+              disabled={!ready || applying || saving || !items.length}
+            >
+              {saving
+                ? <>Guardando…</>
+                : <>{I.check({ size: 14 })} Guardar esta composición</>}
             </button>
+            <div className="bed-actions-hint">
+              Se guarda tal y como la ves, con las fotos del catálogo. No pasa por la IA.
+            </div>
+            <div className="bed-actions-row">
+              <button className="bed-btn bed-btn-ghost" onClick={onClose} disabled={applying || saving}>
+                Cancelar
+              </button>
+              <button
+                className="bed-btn bed-btn-ghost"
+                onClick={apply}
+                disabled={!ready || applying || saving}
+                title="Le manda esta maqueta a la IA para que haga una foto de estudio. La colocación puede cambiar."
+              >
+                {applying
+                  ? <>Regenerando…</>
+                  : <>{I.sparkle({ size: 14 })} Regenerar con IA</>}
+              </button>
+            </div>
           </div>
         </aside>
       </div>
@@ -559,7 +600,7 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
            hitTest() mirando el píxel, para que el aire de una foto transparente
            no tape a los productos de debajo. Los tiradores sí lo capturan. */
         .bed-item{position:absolute;pointer-events:none}
-        .bed-item img{width:100%;height:100%;object-fit:contain;pointer-events:none;filter:drop-shadow(0 6px 10px rgba(45,42,38,.16))}
+        .bed-item img{width:100%;height:100%;object-fit:fill;pointer-events:none;filter:drop-shadow(0 6px 10px rgba(45,42,38,.16))}
         .bed-stage{cursor:grab}
         .bed-stage:active{cursor:grabbing}
 
@@ -611,7 +652,9 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         .bed-referr{margin-top:6px;font-size:11.5px;color:var(--accent);line-height:1.4}
         .bed-refok{margin-top:6px;font-size:11.5px;color:#3a7a5a;line-height:1.4}
 
-        .bed-actions{display:flex;gap:8px;margin-top:auto;padding-top:18px}
+        .bed-actions{display:flex;flex-direction:column;gap:8px;margin-top:auto;padding-top:18px}
+        .bed-actions-row{display:flex;gap:8px}
+        .bed-actions-hint{font-size:11px;color:var(--muted);line-height:1.45;margin:-2px 0 2px}
         .bed-btn{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:12px 14px;border-radius:10px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .15s;border:1px solid transparent}
         .bed-btn:disabled{opacity:.5;cursor:not-allowed}
         .bed-btn-ghost{background:#fff;border-color:var(--line);color:var(--ink)}

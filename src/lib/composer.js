@@ -244,17 +244,28 @@ function drawSizeCm(p, metrics) {
   const fx = Math.max(0.05, 1 - trim.l - trim.r); // fracción visible a lo ancho
   const fy = Math.max(0.05, 1 - trim.t - trim.b); // fracción visible a lo alto
   const visRatio = (ratio * fx) / fy;
-  const longest = Math.max(w, h);
-  let vw, vh;
-  if (visRatio >= 1) { vw = longest; vh = longest / visRatio; }
-  else { vh = longest; vw = longest * visRatio; }
 
-  // Freno de seguridad: ninguna dimensión puede pasarse más de un 30% de su
-  // medida real. Protege del caso en que la foto esté en otra orientación que
-  // las medidas de la ficha (p. ej. medidas de pieza tumbada con foto de pie),
-  // que si no dispara el tamaño del producto.
-  const MAX_OVER = 1.3;
-  const k = Math.min(1, (w * MAX_OVER) / vw, (h * MAX_OVER) / vh);
+  // Qué medida manda la decide la FICHA del producto, no la foto: si está
+  // apuntado como más alto que ancho, manda el alto; si está apuntado tumbado
+  // (un jamón: 20 de alto por 80 de largo), manda el ancho.
+  //
+  // Antes mandaba el lado más largo DE LA FOTO, y cuando la foto no coincidía
+  // con la ficha (un producto alto fotografiado en apaisado, o con la caja de
+  // regalo al lado) la medida real se le aplicaba al eje equivocado: el
+  // producto salía con un tamaño que no tenía nada que ver con el apuntado.
+  const tumbado = w > h;
+  let vw, vh;
+  if (tumbado) { vw = w; vh = w / visRatio; }
+  else { vh = h; vw = h * visRatio; }
+
+  // Freno de seguridad para el OTRO lado: si la foto viene tan descuadrada que
+  // el lado que se deduce se pasa más de un 60% del apuntado, se encoge todo.
+  // Protege del caso en que la foto y la ficha estén en orientaciones
+  // distintas, que si no dispara el tamaño del producto.
+  const MAX_OVER = 1.6;
+  const k = tumbado
+    ? Math.min(1, (h * MAX_OVER) / vh)
+    : Math.min(1, (w * MAX_OVER) / vw);
   vw *= k; vh *= k;
 
   const vis = { w: vw, h: vh };
@@ -376,6 +387,32 @@ export function autoLayout(entries, metrics, ref = null) {
     rows[key] = centerWeighted(rows[key]);
   }
 
+  // Primera pasada: ver cuánto hay que apretar para que quepan todas las
+  // filas. Cada altura se aprieta primero solapando más (así es como se monta
+  // una cesta de verdad) y, solo si aun así no cabe, encogiendo los productos.
+  //
+  // Lo que se encoge se aplica A TODA LA COMPOSICIÓN, no fila por fila: antes
+  // cada altura se reducía por su cuenta, y una fila muy llena salía con los
+  // productos mucho más pequeños que los de la fila de al lado. Las medidas
+  // que apunta el cliente dejaban de verse entre sí, que es justo para lo que
+  // las apunta.
+  const plan = {};
+  let shrink = 1;
+  for (const tier of ['TRASERA', 'MEDIA', 'DELANTERA']) {
+    const list = rows[tier];
+    if (!list.length) continue;
+    const suma = list.reduce((s, p) => s + sizeCm.get(p).vis.w * pxPerCm, 0);
+    const ext = ref?.extents?.[tier];
+    const maxW = CANVAS_W * Math.max(0.25, ext ? (ext.max - ext.min) : ROW_MAX_W);
+    const baseOv = tier === 'TRASERA' ? 0.04 : 0.10;   // solape lateral normal
+    const maxOv  = tier === 'TRASERA' ? 0.18 : 0.30;   // solape máximo si aprieta
+    let ov = baseOv;
+    if (suma * (1 - ov) > maxW) ov = Math.min(maxOv, Math.max(ov, 1 - maxW / suma));
+    const total = suma * (1 - ov);
+    if (total > maxW) shrink = Math.min(shrink, maxW / total);
+    plan[tier] = { ov, total, centro: ext ? (ext.min + ext.max) / 2 : 0.5 };
+  }
+
   const items = [];
   let z = 0;
   for (const tier of ['TRASERA', 'MEDIA', 'DELANTERA']) {
@@ -393,16 +430,8 @@ export function autoLayout(entries, metrics, ref = null) {
       };
     });
 
-    const OVERLAP = tier === 'TRASERA' ? 0.04 : 0.10; // solape lateral
-    let total = sizes.reduce((s, it) => s + it.visW, 0) * (1 - OVERLAP);
-    // Con lote de referencia, cada altura se abre lo mismo que se abría allí
-    // y apoya donde apoyaba; si no, se usan los valores por defecto.
-    const ext = ref?.extents?.[tier];
-    const anchoDisponible = ext ? (ext.max - ext.min) : ROW_MAX_W;
-    const centro = ext ? (ext.min + ext.max) / 2 : 0.5;
-    const maxW = CANVAS_W * Math.max(0.25, anchoDisponible);
-    const shrink = total > maxW ? maxW / total : 1;
-    total *= shrink;
+    const { ov: OVERLAP, centro } = plan[tier];
+    const total = plan[tier].total * shrink;
 
     let x = centro * CANVAS_W - total / 2;   // x = borde izquierdo VISIBLE del siguiente
     const baseY = CANVAS_H * (ref?.baselines?.[tier] ?? BASELINE[tier]);
@@ -430,11 +459,13 @@ export function autoLayout(entries, metrics, ref = null) {
   // 80 cm) empujarían todo lo demás a los extremos.
   jamones.forEach((p, i) => {
     const { box, vis } = sizeCm.get(p);
-    let dw = box.w * pxPerCm;
-    let dh = box.h * pxPerCm;
+    // El mismo apretón que el resto: si la composición se ha encogido para que
+    // quepa, el jamón se encoge con ella o dejaría de estar a escala.
+    let dw = box.w * pxPerCm * shrink;
+    let dh = box.h * pxPerCm * shrink;
     // Que no se coma el encuadre: como mucho media anchura de lienzo visible.
     const maxVis = CANVAS_W * 0.50;
-    const visW = vis.w * pxPerCm;
+    const visW = vis.w * pxPerCm * shrink;
     if (visW > maxVis) { const k = maxVis / visW; dw *= k; dh *= k; }
     const baseJamon = (ref?.baselines?.DELANTERA ?? BASELINE.DELANTERA) - 0.08;
     items.push({
@@ -480,39 +511,103 @@ export async function renderBlueprint(layout, products, opts = {}) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
 
-  const bySku = new Map((products || []).map(p => [p.sku, p]));
   const items = [...(layout?.items || [])].sort((a, b) => (a.z || 0) - (b.z || 0));
-
-  // Cargamos cada imagen una sola vez aunque el producto se repita.
-  const urls = new Map();
-  for (const it of items) {
-    const p = bySku.get(it.sku);
-    if (urls.has(it.sku)) continue;
-    // Preferimos la versión sin fondo blanco que dejó loadMetrics.
-    const src = metricOf(metrics, it.sku)?.src || p?.img;
-    if (src) urls.set(it.sku, src.startsWith('data:') ? loadImageSrc(src) : loadImage(src));
-  }
-  const loaded = new Map();
-  for (const [sku, promise] of urls) loaded.set(sku, await promise);
+  const loaded = await loadLayoutImages(items, products, metrics);
 
   for (const it of items) {
     const img = loaded.get(it.sku);
     if (!img) continue;
-    // El ALTO manda (sale de las medidas en cm) y el ancho se deduce de la
-    // proporción real de la foto: así el producto nunca se deforma y se pinta
-    // exactamente igual que en el editor.
-    const dh = it.h * H;
-    const dw = dh * (img.naturalWidth / img.naturalHeight);
-    const cx = (it.x + it.w / 2) * W;
-    const cy = (it.y + it.h / 2) * H;
-    ctx.save();
-    ctx.translate(cx, cy);
-    if (it.rot) ctx.rotate((it.rot * Math.PI) / 180);
-    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-    ctx.restore();
+    drawItem(ctx, img, it, W, H);
   }
 
   return await canvasToBlob(canvas, 0.92);
+}
+
+// Pinta un producto de la maqueta ocupando su caja entera.
+//
+// La caja se monta siempre con la proporción real de la foto, así que en
+// condiciones normales esto no deforma nada. Cuando el usuario estira un
+// producto a propósito con los tiradores de los lados (transformación libre),
+// la caja deja de tener esa proporción y el producto sale estirado — que es
+// exactamente lo que ha pedido. Antes se ignoraba: el alto mandaba y el ancho
+// se deducía de la foto, así que estirar de los lados no hacía nada.
+function drawItem(ctx, img, it, W, H) {
+  const dw = it.w * W;
+  const dh = it.h * H;
+  const cx = (it.x + it.w / 2) * W;
+  const cy = (it.y + it.h / 2) * H;
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (it.rot) ctx.rotate((it.rot * Math.PI) / 180);
+  ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+  ctx.restore();
+}
+
+// Carga (una sola vez por sku) las fotos que hacen falta para pintar un layout.
+async function loadLayoutImages(items, products, metrics) {
+  const bySku = new Map((products || []).map(p => [p.sku, p]));
+  const urls = new Map();
+  for (const it of items) {
+    if (urls.has(it.sku)) continue;
+    // Preferimos la versión sin fondo blanco que dejó loadMetrics.
+    const src = metricOf(metrics, it.sku)?.src || bySku.get(it.sku)?.img;
+    if (src) urls.set(it.sku, src.startsWith('data:') ? loadImageSrc(src) : loadImage(src));
+  }
+  const loaded = new Map();
+  for (const [sku, promise] of urls) loaded.set(sku, await promise);
+  return loaded;
+}
+
+// ---------- foto final montada a mano (sin IA) ----------
+
+// Pinta la composición tal cual está en el editor y devuelve un JPEG listo
+// para guardar como foto del bodegón.
+//
+// Por qué existe: el cliente coloca los productos a mano y lo que quería era
+// quedarse EXACTAMENTE con eso. La única salida era "Aplicar y regenerar", que
+// le mandaba la maqueta a la IA y volvía con otra foto — otra colocación y, lo
+// que más molestaba, con las etiquetas y los envases reinventados. Aquí no
+// interviene la IA: son las fotos del catálogo, en su sitio y a su tamaño.
+export async function renderComposition(layout, products, opts = {}) {
+  const metrics = opts.metrics || null;
+  const scale = opts.scale || 1;
+  const W = Math.round((layout?.canvas?.w || CANVAS_W) * scale);
+  const H = Math.round((layout?.canvas?.h || CANVAS_H) * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Fondo: blanco con un punto de calidez abajo, para que los productos no
+  // queden flotando en el vacío pero siga sirviendo para catálogo y PDF.
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.62, '#fdfcfa');
+  g.addColorStop(1, '#f2ede6');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+
+  const items = [...(layout?.items || [])].sort((a, b) => (a.z || 0) - (b.z || 0));
+  const loaded = await loadLayoutImages(items, products, metrics);
+
+  // Sombra suave debajo de cada producto: sin ella el montaje se ve plano, con
+  // los recortes pegados. Como las fotos van recortadas, la sombra sale con la
+  // silueta del producto.
+  for (const it of items) {
+    const img = loaded.get(it.sku);
+    if (!img) continue;
+    ctx.save();
+    ctx.shadowColor = 'rgba(58, 48, 38, 0.26)';
+    ctx.shadowBlur = H * 0.016;
+    ctx.shadowOffsetY = H * 0.009;
+    drawItem(ctx, img, it, W, H);
+    ctx.restore();
+  }
+
+  return await canvasToBlob(canvas, 0.94);
 }
 
 // Rejilla con todos los productos (uno por celda, sin repetir), en el MISMO
@@ -570,6 +665,10 @@ export function fitContain(box, ratio) {
 export function normalizeLayoutToImages(layout, metrics) {
   if (!layout?.items) return layout;
   const items = layout.items.map(it => {
+    // `free` = el usuario lo estiró a mano con los tiradores de los lados. Si
+    // se le recalculase el ancho se le desharía el cambio al volver a abrir el
+    // editor, que es justo de lo que se quejaba el cliente.
+    if (it.free) return { ...it };
     const ratio = metricOf(metrics, it.sku)?.ratio;
     if (!ratio || !isFinite(ratio)) return { ...it };
     const cx = it.x + it.w / 2;

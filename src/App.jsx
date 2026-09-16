@@ -16,7 +16,7 @@ import MinimizedGenPill from './components/MinimizedGenPill.jsx';
 import {
   listProducts, upsertProduct, deleteProduct, uploadProductPhoto,
   listBodegones, updateBodegon, deleteBodegon,
-  startBodegonGeneration, pollBodegon, commitBodegon, discardBodegon,
+  startBodegonGeneration, saveManualBodegon, pollBodegon, commitBodegon, discardBodegon,
   listInProgress,
 } from './lib/api.js';
 import { SUPABASE_READY } from './lib/supabase.js';
@@ -397,6 +397,57 @@ export default function App() {
       }
     }
   };
+  // "Guardar esta composición": se queda con la maqueta tal cual, montada con
+  // las fotos del catálogo. No pasa por la IA, así que no hay espera ni
+  // sorpresas: lo que se ve en el editor es lo que queda.
+  const handleEditorSave = async ({ layout, instrucciones }) => {
+    const gen = editorGen;
+    if (!gen) return;
+    const oldRef = gen.ref;
+    try {
+      const created = await saveManualBodegon({
+        items: gen.items,
+        extras: (gen.items || []).filter(it => !it.sku),
+        title: gen.title,
+        description: gen.description || '',
+        tags: gen.tags || [],
+        layout,
+        instrucciones,
+        products,
+      });
+      addGen({
+        ref: created.id,
+        title: created.title,
+        description: created.description,
+        tags: created.tags,
+        items: created.items,
+        layout: created.layout,
+        instrucciones: created.instrucciones,
+        status: 'draft',
+        image: created.image,
+        image_path: created.image_path,
+        error: null,
+        t0: Date.now(),
+      });
+      setViewingRef(created.id);
+      setBodegonNumber(n => n + 1);
+      setEditorGen(null);
+      // Si se estaba editando un borrador sin guardar, se tira: ya está
+      // sustituido por esta composición. Los del historial se conservan.
+      if (!gen.fromHistory) {
+        removeGen(oldRef);
+        discardBodegon(oldRef).catch(() => {});
+      }
+    } catch (e) {
+      showInfo({
+        icon: 'trash', tone: 'danger',
+        title: 'No se pudo guardar la composición',
+        description: e.message || 'Error desconocido al montar la imagen.',
+        confirmLabel: 'Cerrar', confirmTone: 'neutral',
+      });
+    }
+  };
+
   const handleOverlaySave = async () => {
     const gen = viewingGen;
     if (!gen || gen.status !== 'draft') return;
@@ -637,6 +688,7 @@ export default function App() {
         products={products}
         onClose={() => setEditorGen(null)}
         onApply={handleEditorApply}
+        onSave={handleEditorSave}
       />
 
       {editBodegon && (

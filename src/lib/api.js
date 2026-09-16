@@ -509,26 +509,22 @@ async function nextBodegonNumber() {
   return (data?.[0]?.numero || 0) + 1;
 }
 
-// items: [{ sku, qty }]. Se acepta también `skus` (array de strings) por
-// compatibilidad — se convierte a qty 1 cada uno.
-// `tags`: array de ids de etiquetas que aplicar al lote (sin gluten, vegano…).
-export async function startBodegonGeneration({
-  items, extras, skus, title, description, tags,
-  layout = null, instrucciones = '', layoutEditado = false, products = null,
-}) {
-  if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
-
+// Deja la lista de productos de un bodegón en su forma definitiva:
+//   normItems  → productos del catálogo, con su cantidad
+//   extraItems → cajas, estuches y regalos que no están en el catálogo
+//   productos  → los dos juntos, tal y como se guardan en la fila
+function prepareItems({ items, skus, extras, layout, layoutEditado }) {
   let normItems = [];
   if (Array.isArray(items) && items.length) {
-    normItems = items.map(it => ({ sku: it.sku, qty: Number(it.qty) || 1 }));
+    normItems = items.filter(it => it?.sku).map(it => ({ sku: it.sku, qty: Number(it.qty) || 1 }));
   } else if (Array.isArray(skus) && skus.length) {
     normItems = skus.map(s => ({ sku: s, qty: 1 }));
   }
   if (normItems.length === 0) throw new Error('Selecciona al menos un producto.');
 
-  // Si la maqueta se ha montado a mano, manda ella: las unidades que se le
-  // piden a la IA son las que el usuario ha dejado puestas. Así duplicar o
-  // quitar un producto en el editor cuadra con la foto y con el listado.
+  // Si la maqueta se ha montado a mano, manda ella: las unidades son las que
+  // el usuario ha dejado puestas. Así duplicar o quitar un producto en el
+  // editor cuadra con la foto y con el listado.
   if (layoutEditado && layout?.items?.length) {
     const counts = new Map();
     for (const it of layout.items) {
@@ -542,12 +538,24 @@ export async function startBodegonGeneration({
 
   // Items "extra" sin sku (cajas, regalos, estuches que no están en el
   // catálogo): se guardan por su nombre para que salgan en el listado y el
-  // PDF, pero NO se envían a la composición de la foto (la función de
-  // generación los ignora al no tener sku/foto).
+  // PDF, pero no entran en la foto (no tienen imagen).
   const extraItems = (Array.isArray(extras) ? extras : [])
     .filter(e => e && e.name)
     .map(e => ({ sku: null, name: String(e.name), ref: e.ref || null, qty: Number(e.qty) || 1 }));
-  const productos = [...normItems, ...extraItems];
+
+  return { normItems, extraItems, productos: [...normItems, ...extraItems] };
+}
+
+// items: [{ sku, qty }]. Se acepta también `skus` (array de strings) por
+// compatibilidad — se convierte a qty 1 cada uno.
+// `tags`: array de ids de etiquetas que aplicar al lote (sin gluten, vegano…).
+export async function startBodegonGeneration({
+  items, extras, skus, title, description, tags,
+  layout = null, instrucciones = '', layoutEditado = false, products = null,
+}) {
+  if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
+
+  const { normItems, extraItems, productos } = prepareItems({ items, skus, extras, layout, layoutEditado });
 
   const ref = newBodegonRef();
   const numero = await nextBodegonNumber();
@@ -629,6 +637,91 @@ export async function pollBodegon(ref, { intervalMs = 2500, timeoutMs = 14 * 60 
     await new Promise(r => setTimeout(r, intervalMs));
   }
   throw new Error('La generación está tardando demasiado. Inténtalo de nuevo más tarde.');
+}
+
+// ---------- GUARDAR LA COMPOSICIÓN TAL CUAL (sin IA) ----------
+//
+// El cliente coloca los productos a mano en el editor y quiere quedarse con
+// eso. Hasta ahora la única salida era "Aplicar y regenerar": la maqueta se le
+// mandaba a la IA, que devolvía otra colocación y —lo que más molestaba— con
+// las etiquetas y los envases reinventados en vez de los del catálogo.
+//
+// Aquí no interviene la IA: la foto se monta en el navegador con las fotos
+// reales del catálogo, se sube a Storage y el bodegón queda en 'draft', igual
+// que una generación terminada. Desde ahí se guarda al historial, se descarga
+// el PDF y se puede volver a editar como cualquier otro.
+export async function saveManualBodegon({
+  items, extras, skus, title, description, tags,
+  layout, instrucciones = '', products = null,
+}) {
+  if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
+  if (!layout?.items?.length) throw new Error('La composición está vacía.');
+
+  const { normItems, productos } = prepareItems({
+    items, skus, extras, layout, layoutEditado: true,
+  });
+
+  const ref = newBodegonRef();
+  const numero = await nextBodegonNumber();
+  const finalTitle = title || `Bodegón #${numero}`;
+  const finalTags = Array.isArray(tags) ? tags : [];
+
+  // Montar la foto. Se recargan las medidas de cada imagen para recortarles el
+  // fondo blanco, igual que hace el editor: si no, algún producto saldría con
+  // su recuadro blanco encima de los de detrás.
+  const { renderComposition, loadMetrics } = await import('./composer.js');
+  const catalog = products || [];
+  const bySku = new Map(catalog.map(p => [p.sku, p]));
+  const usados = [...new Set(layout.items.map(it => it.sku))]
+    .map(sku => bySku.get(sku))
+    .filter(p => p?.img);
+  const metrics = await loadMetrics(usados);
+  const blob = await renderComposition(layout, catalog, { metrics });
+  if (!blob) throw new Error('No se pudo montar la imagen de la composición.');
+
+  const path = `${ref}.jpg`;
+  const { error: upErr } = await supabase.storage
+    .from('bodegones')
+    .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+  if (upErr) throw new Error('No se pudo guardar la imagen: ' + upErr.message);
+
+  const baseRow = {
+    ref,
+    numero,
+    nombre: finalTitle,
+    descripcion: description || null,
+    productos,
+    tags: finalTags,
+    estado: 'draft',
+    imagen_path: path,
+  };
+  const fullRow = {
+    ...baseRow,
+    layout,
+    layout_editado: true,
+    instrucciones: instrucciones || null,
+    modelo_usado: 'composición manual',
+  };
+
+  // Igual que en la generación: si faltan las columnas del editor, se guarda
+  // sin ellas antes que dejar al usuario sin su composición.
+  let { error: insErr } = await supabase.from('bodegones').insert(fullRow);
+  if (insErr && /column|schema cache/i.test(insErr.message || '')) {
+    console.warn('[bodegón] Faltan columnas del editor en Supabase; se guarda sin maqueta.');
+    ({ error: insErr } = await supabase.from('bodegones').insert(baseRow));
+  }
+  if (insErr) {
+    await supabase.storage.from('bodegones').remove([path]).catch(() => {});
+    throw new Error('No se pudo registrar el bodegón: ' + insErr.message);
+  }
+
+  return {
+    id: ref, n: numero, title: finalTitle, description: description || '', tags: finalTags,
+    items: productos, skus: normItems.map(i => i.sku),
+    layout, instrucciones: instrucciones || '',
+    image: publicUrl('bodegones', path),
+    image_path: path,
+  };
 }
 
 // Compatibilidad: API anterior que devolvía el bodegón completo en una sola llamada.
