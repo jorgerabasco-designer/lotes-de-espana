@@ -271,7 +271,12 @@ export async function generateEtiquetasPDF({ loteNumero, productos }) {
   doc.setFontSize(22);
   doc.setTextColor(45, 42, 38);
   const titleX = marginX + logoW + 6;
-  doc.text(`Lote ${loteNumero}`, titleX, 20);
+  // Los jamones y paletas sueltos no son lotes: van por su referencia, así que
+  // poner "Lote 07IB043" en la cabecera despistaría.
+  const rotulo = /^\d+$/.test(String(loteNumero || ''))
+    ? `Lote ${loteNumero}`
+    : `Ref. ${loteNumero}`;
+  doc.text(rotulo, titleX, 20);
 
   // ---- Rejilla 2 × 2 (4 etiquetas por página) ----
   const cols = 2, rows = 2;

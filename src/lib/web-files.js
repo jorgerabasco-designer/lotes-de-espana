@@ -42,6 +42,11 @@ const NOMENCLATURA_EXCEL_NAME = 'nomenclatura-qr.xlsx';
 // Ejemplos NO válidos: "0106AC044-x.png" (no empieza por 2 dígitos + 2 letras + 3 dígitos)
 const REF_RE = /^([0-9]{2}[A-Z]{2}[0-9]{3})(?:[\s\-_.]|$)/;
 
+// La misma referencia, pero buscándola en cualquier parte del nombre. Las
+// fotos de jamones y paletas sueltos vienen nombradas al revés que las de
+// lote: "Paletas y Jamones 07IB043.jpg", con la referencia al final.
+const REF_ANYWHERE_RE = /(?:^|[\s\-_.])([0-9]{2}[A-Z]{2}[0-9]{3})(?:[\s\-_.]|$)/;
+
 // ---------- helpers de nombres ----------
 
 // De un nombre de fichero saca la extensión saneada (sin punto, minúsculas).
@@ -60,7 +65,9 @@ export function extractRefFromFilename(name) {
   return m ? m[1] : null;
 }
 
-// Del nombre de fichero saca el número de lote. Reconoce ambos formatos:
+// Del nombre de fichero saca el identificador del lote. Reconoce tres formatos:
+//   · Jamón o paleta suelto:     "Paletas y Jamones 07IB043.jpg" → "07IB043"
+//     (no son lotes numerados: van por su referencia de producto)
 //   · Formato 2026 del cliente:  "216_001.jpg"                → "216"
 //     (los 3+ primeros dígitos = nº de lote; "_001" es sufijo de versión)
 //   · Formato antiguo de la web: "lote-de-navidad-surtido-216.jpg" → "216"
@@ -68,6 +75,10 @@ export function extractRefFromFilename(name) {
 export function extractLoteNumberFromFilename(name) {
   if (!name) return null;
   const base = String(name).split('/').pop().replace(/\.[^.]+$/, '');
+  // 0) Una referencia de producto manda sobre cualquier número suelto: si no,
+  //    de "Paletas y Jamones 07IB043" se sacaría "043", que no es nada.
+  const ref = base.toUpperCase().match(REF_ANYWHERE_RE);
+  if (ref) return ref[1];
   // 1) Prioridad al patrón "NNN..." al inicio del nombre (formato 2026).
   const startMatch = base.match(/^(\d{2,})/);
   if (startMatch) return startMatch[1];
@@ -222,7 +233,7 @@ export async function uploadLotePhoto(file) {
   }
   const num = extractLoteNumberFromFilename(file.name);
   if (!num) {
-    return { ok: false, error: `El nombre "${file.name}" no contiene un número de lote (necesita al menos un grupo de dígitos, ej. 216_001.jpg).` };
+    return { ok: false, error: `El nombre "${file.name}" no contiene ni un número de lote (ej. 216_001.jpg) ni una referencia de producto (ej. Paletas y Jamones 07IB043.jpg).` };
   }
 
   // REGLA DE NEGOCIO: una foto de lote SIEMPRE entra a 700×800.

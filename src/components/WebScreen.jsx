@@ -30,7 +30,12 @@ function formatBytes(n) {
   return (n / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
+// Referencia de producto (jamones y paletas sueltos): 2 dígitos + 2 letras +
+// 3 dígitos, ej. 07IB043. No son lotes numerados, pero se piden igual.
+const REF_PRODUCTO_RE = /^[0-9]{2}[A-Z]{2}[0-9]{3}$/;
+
 // Parsea "104, 105, 200-205, 300" → ['104','105','200','201','202','203','204','205','300']
+// Admite también referencias sueltas: "07IB043, 120" → ['07IB043','120'].
 function parseLoteInput(str) {
   if (!str) return [];
   const out = [];
@@ -50,6 +55,9 @@ function parseLoteInput(str) {
       }
     } else if (/^\d+$/.test(s)) {
       if (!seen.has(s)) { seen.add(s); out.push(s); }
+    } else if (REF_PRODUCTO_RE.test(s.toUpperCase())) {
+      const ref = s.toUpperCase();
+      if (!seen.has(ref)) { seen.add(ref); out.push(ref); }
     }
   }
   return out;
@@ -463,13 +471,19 @@ export default function WebScreen({ showInfo }) {
       showInfo?.({
         icon: 'sparkle', tone: 'info',
         title: 'Introduce un número de lote',
-        description: 'Ejemplos: 104   ·   104, 105   ·   200-205, 300',
+        description: 'Ejemplos: 104   ·   104, 105   ·   200-205, 300   ·   07IB043',
         confirmLabel: 'Entendido', confirmTone: 'neutral',
       });
       return;
     }
-    const validos = numeros.filter(n => excelSheetsSet.has(n));
-    const invalidos = numeros.filter(n => !excelSheetsSet.has(n));
+    // La pestaña se busca tal cual y, si no aparece, ignorando
+    // mayúsculas: una referencia escrita "07ib043" tiene que valer igual.
+    const resuelto = (n) => {
+      if (excelSheetsSet.has(n)) return n;
+      return (excelWorkbook?.SheetNames || []).find(s2 => s2.trim().toUpperCase() === n.toUpperCase()) || null;
+    };
+    const validos = numeros.map(resuelto).filter(Boolean);
+    const invalidos = numeros.filter(n => !resuelto(n));
 
     if (!validos.length) {
       showInfo?.({
@@ -602,13 +616,13 @@ export default function WebScreen({ showInfo }) {
       <div className="web-block">
         <div className="web-blockh">
           <h3>Generar PDFs</h3>
-          <p>Introduce el número (o varios) de lote. Se descarga un ZIP con 3 PDFs por lote: etiquetas traseras, QR con precio y QR sin precio. Puedes usar comas, espacios y rangos.</p>
+          <p>Introduce el número (o varios) de lote, o la referencia de un jamón o paleta suelto (ej. 07IB043). Se descarga un ZIP con 3 PDFs por lote: etiquetas traseras, QR con precio y QR sin precio. Puedes usar comas, espacios y rangos.</p>
         </div>
         <div className="lote-input-row">
           <input
             className="lote-input"
             type="text"
-            placeholder="Ej: 104   ·   104, 105   ·   200-205, 300"
+            placeholder="Ej: 104   ·   104, 105   ·   200-205   ·   07IB043"
             value={loteInput}
             onChange={(e) => setLoteInput(e.target.value)}
             disabled={generating}
