@@ -485,16 +485,48 @@ export async function generateDescripcionPDF({
   }
 
   // ---------- TÍTULO + PRECIO ----------
+  //
+  // El título va a la izquierda y el precio a la derecha, en la misma línea.
+  // Si el título es largo hay que apretarlo: con un nombre de artículo entero
+  // (un jamón suelto trae "PALETA CEBO 50% R. IBÉRICA IZQUIERDO SALAMANCA
+  // 4,5 KG APROX.") se salía de la página y se montaba encima del precio.
+  // Primero se prueba a encoger la letra y, si aun así no cabe, parte en dos
+  // líneas — el precio se queda en la primera, a su altura de siempre.
   const titulo = `${(tipoLote || 'LOTE').toUpperCase()} - REF. ${loteNumero}`;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(19);
   doc.setTextColor(...INK);
-  doc.text(titulo, marginX, y);
-  if (precio != null && !isNaN(precio)) {
-    const precioStr = `${Number(precio).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€ + IVA`;
-    doc.text(precioStr, W - marginX, y, { align: 'right' });
+
+  const precioStr = (precio != null && !isNaN(precio))
+    ? `${Number(precio).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€ + IVA`
+    : null;
+  doc.setFontSize(19);
+  const precioW = precioStr ? doc.getTextWidth(precioStr) : 0;
+  const tituloMaxW = W - marginX * 2 - (precioStr ? precioW + 6 : 0);
+
+  const TITULO_FS_MAX = 19, TITULO_FS_MIN = 11, TITULO_FS_STEP = 0.5;
+  let tituloFs = TITULO_FS_MAX;
+  while (tituloFs > TITULO_FS_MIN) {
+    doc.setFontSize(tituloFs);
+    if (doc.getTextWidth(titulo) <= tituloMaxW) break;
+    tituloFs -= TITULO_FS_STEP;
   }
-  y += TITLE_H;
+  doc.setFontSize(tituloFs);
+  const tituloLineas = doc.getTextWidth(titulo) <= tituloMaxW
+    ? [titulo]
+    : doc.splitTextToSize(titulo, tituloMaxW).slice(0, 2);
+
+  doc.text(tituloLineas[0], marginX, y);
+  if (precioStr) {
+    doc.setFontSize(19);
+    doc.text(precioStr, W - marginX, y, { align: 'right' });
+    doc.setFontSize(tituloFs);
+  }
+  // Las líneas de más bajan el bloque entero para no comerse el separador.
+  const tituloExtra = (tituloLineas.length - 1) * (tituloFs * 0.42);
+  for (let i = 1; i < tituloLineas.length; i++) {
+    doc.text(tituloLineas[i], marginX, y + i * (tituloFs * 0.42));
+  }
+  y += TITLE_H + tituloExtra;
 
   // Línea gruesa separadora
   doc.setDrawColor(...INK);

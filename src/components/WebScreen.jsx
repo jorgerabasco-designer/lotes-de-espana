@@ -246,6 +246,9 @@ function tipoFromNomenclatura(nombrePdf) {
   if (!nombrePdf) return null;
   return nombrePdf
     .replace(/\.pdf$/i, '')
+    // Referencia de producto al final ("Paletas y Jamones 07IB043"): fuera,
+    // que si no saldría dos veces ("... 07IB043 - REF. 07IB043").
+    .replace(/\s+[0-9]{2}[A-Za-z]{2}[0-9]{3}\s*$/, '')
     .replace(/\s+\d+\s*$/, '')
     .replace(/\s+REF\.?\s*\d+\s*$/i, '')
     .trim()
@@ -518,7 +521,16 @@ export default function WebScreen({ showInfo }) {
       //   1. col C "Nombre Artículo" del Excel de Tarifas (fuente principal)
       //   2. col C del Excel de nomenclatura (fallback opcional)
       //   3. derivar del nombre del fichero
-      const tipoLote   = tarifa?.titulo || entry?.titulo || tipoFromNomenclatura(nombrePdf) || 'LOTE';
+      //
+      // Los jamones y paletas sueltos van al revés. No son lotes: en Tarifas,
+      // su col C es el nombre comercial del artículo entero ("PALETA CEBO 50%
+      // R. IBÉRICA IZQUIERDO SALAMANCA 4,5 KG APROX."), que como título no
+      // sirve — repite el listado y no cabe en la línea del precio. Para ellos
+      // manda el nombre del fichero de la Nomenclatura QR: "Paletas y Jamones".
+      const esReferencia = !/^\d+$/.test(String(num));
+      const tipoLote   = esReferencia
+        ? (tipoFromNomenclatura(nombrePdf) || entry?.titulo || tarifa?.titulo || 'LOTE')
+        : (tarifa?.titulo || entry?.titulo || tipoFromNomenclatura(nombrePdf) || 'LOTE');
       const precio     = tarifa?.precio ?? null;
       const fotoUrl    = await getLotePhotoUrl(num);
 
