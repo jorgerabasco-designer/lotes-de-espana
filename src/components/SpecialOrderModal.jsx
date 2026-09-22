@@ -25,6 +25,12 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
   const [editing, setEditing] = useState({});  // { sku: qty } sobreescritura local
   const [removed, setRemoved] = useState(new Set());
   const [dragOver, setDragOver] = useState(false);
+  // Segunda pantalla: cómo quiere Ana la composición antes de generar.
+  const [filas, setFilas] = useState('auto');     // 'auto' | 2 | 3
+  const [refLote, setRefLote] = useState('');     // "parecerse al lote nº ___"
+  const [refBusy, setRefBusy] = useState(false);
+  const [refError, setRefError] = useState('');
+  const [instrucciones, setInstrucciones] = useState('');
 
   if (!open) return null;
 
@@ -39,6 +45,11 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
     setDescription('');
     setEditing({});
     setRemoved(new Set());
+    setFilas('auto');
+    setRefLote('');
+    setRefBusy(false);
+    setRefError('');
+    setInstrucciones('');
   };
 
   const handleClose = () => {
@@ -126,8 +137,50 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
   const removeItem = (sku) => setRemoved(r => new Set([...r, sku]));
   const restoreItem = (sku) => setRemoved(r => { const c = new Set(r); c.delete(sku); return c; });
 
+  // De la lista de productos se pasa a decidir la composición, no se genera
+  // directamente: acertar a la primera sale más barato que regenerar.
   const handleConfirm = () => {
     if (!finalItems.length) return;
+    setRefError('');
+    setStage('composicion');
+  };
+
+  const handleGenerate = async () => {
+    if (!finalItems.length || refBusy) return;
+
+    // Si ha pedido parecerse a otro lote, se analiza AHORA para poder avisar
+    // aquí mismo si ese lote no existe o no se reconoce. Después ya sería
+    // tarde: la generación va por su cuenta y tarda minutos.
+    let structure = null;
+    const n = refLote.trim();
+    if (n) {
+      if (!/^\d{1,5}$/.test(n)) {
+        setRefError('Escribe solo el número del lote, por ejemplo 311.');
+        return;
+      }
+      setRefBusy(true);
+      setRefError('');
+      try {
+        const res = await fetch('/api/analyze-lote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lote: n }),
+        });
+        // Si la respuesta no es JSON (un 502, una página de error…) no se
+        // revienta con un error técnico: se avisa en cristiano.
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `No se ha podido mirar el lote ${n}. Compruébalo o déjalo en blanco.`);
+        const { structureFromSlots } = await import('../lib/composer.js');
+        structure = structureFromSlots(data.slots);
+        if (!structure) throw new Error('No se han reconocido suficientes productos en la foto de ese lote.');
+      } catch (e) {
+        setRefError(e.message || 'Error analizando el lote.');
+        setRefBusy(false);
+        return;
+      }
+      setRefBusy(false);
+    }
+
     // Items sin coincidencia en el catálogo (cajas, regalos, estuches que no
     // tenemos en la web). No van a la foto pero SÍ deben aparecer en el
     // listado del PDF, así que los pasamos como "extras" (sin sku).
@@ -141,6 +194,11 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
       extras,
       title: title || 'Pedido especial',
       description: description || '',
+      instrucciones: instrucciones.trim(),
+      layoutHint: {
+        filas: filas === 'auto' ? null : filas,
+        structure,
+      },
     });
     // El padre debería cerrar la modal; por si acaso, la limpiamos.
     reset();
@@ -159,12 +217,14 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
             {stage === 'upload' && 'Sube un PDF o Excel'}
             {stage === 'parsing' && 'Leyendo el fichero…'}
             {stage === 'confirm' && 'Confirma los productos detectados'}
+            {stage === 'composicion' && '¿Cómo quieres la composición?'}
             {stage === 'error' && 'No se ha podido procesar'}
           </h2>
           <p className="so-sub">
             {stage === 'upload' && 'Arrastra aquí el presupuesto del cliente y detectamos los productos automáticamente.'}
             {stage === 'parsing' && fileName}
             {stage === 'confirm' && fileName}
+            {stage === 'composicion' && 'Cuanto más concreta sea, menos habrá que retocar después.'}
             {stage === 'error' && fileName}
           </p>
         </header>
@@ -323,6 +383,78 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
           </div>
         )}
 
+        {stage === 'composicion' && (
+          <div className="so-body so-body-comp">
+            <div className="so-field">
+              <label className="so-label">Cuántas alturas</label>
+              <div className="so-pills">
+                {[
+                  ['auto', 'Automático', 'Se decide por el tamaño de cada producto'],
+                  [3, '3 filas', 'Atrás, centro y delante — para lotes con muchos productos'],
+                  [2, '2 filas', 'Solo atrás y delante — para lotes cortos'],
+                ].map(([val, label, hint]) => (
+                  <button
+                    key={String(val)}
+                    className={`so-pill ${filas === val ? 'on' : ''}`}
+                    onClick={() => setFilas(val)}
+                    title={hint}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="so-hint">
+                {filas === 'auto' && 'Los productos altos van detrás y los bajos delante.'}
+                {filas === 3 && 'Tres alturas: atrás, centro y delante.'}
+                {filas === 2 && 'Dos alturas: los altos detrás y el resto delante.'}
+              </div>
+            </div>
+
+            <div className="so-field">
+              <label className="so-label">Que se parezca a otro lote <span className="so-opt">(opcional)</span></label>
+              <input
+                className="so-input short"
+                value={refLote}
+                onChange={e => { setRefLote(e.target.value.replace(/\D/g, '')); setRefError(''); }}
+                placeholder="Nº de lote"
+                inputMode="numeric"
+              />
+              <div className="so-hint">
+                Coge una foto de lote ya subida y reparte estos productos como estaban allí.
+              </div>
+              {refError && <div className="so-referr">{refError}</div>}
+            </div>
+
+            <div className="so-field">
+              <label className="so-label">Cómo quieres que quede <span className="so-opt">(opcional)</span></label>
+              <textarea
+                className="so-area"
+                value={instrucciones}
+                onChange={e => setInstrucciones(e.target.value)}
+                rows={5}
+                placeholder={'Por ejemplo: el jamón tumbado en diagonal delante, los vinos detrás y las latas repartidas por delante.'}
+              />
+            </div>
+          </div>
+        )}
+
+        {stage === 'composicion' && (
+          <footer className="so-foot">
+            <button className="so-btn so-btn-ghost" onClick={() => setStage('confirm')} disabled={refBusy}>
+              Atrás
+            </button>
+            <button
+              className="so-btn so-btn-primary"
+              onClick={handleGenerate}
+              disabled={finalItems.length === 0 || refBusy}
+            >
+              {refBusy
+                ? <>Mirando el lote {refLote}…</>
+                : <>{I.sparkle({ size: 14 })} Generar bodegón con {finalItems.length} {finalItems.length === 1 ? 'producto' : 'productos'}</>}
+            </button>
+          </footer>
+        )}
+
         {stage === 'confirm' && (
           <footer className="so-foot">
             <button className="so-btn so-btn-ghost" onClick={reset}>
@@ -333,7 +465,7 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
               onClick={handleConfirm}
               disabled={finalItems.length === 0}
             >
-              {I.sparkle({ size: 14 })} Generar bodegón con {finalItems.length} {finalItems.length === 1 ? 'producto' : 'productos'}
+              Continuar con {finalItems.length} {finalItems.length === 1 ? 'producto' : 'productos'}
             </button>
           </footer>
         )}
@@ -409,6 +541,19 @@ export default function SpecialOrderModal({ open, onClose, products, onConfirm }
           .so-warn-text{flex:1;min-width:0}
           .so-warn-t{font-size:12.5px;font-weight:600;color:var(--ink);line-height:1.4}
           .so-warn-s{font-size:11.5px;color:var(--ink-2);margin-top:4px;line-height:1.5}
+
+          .so-body-comp .so-field{margin-bottom:22px}
+          .so-pills{display:flex;gap:6px;flex-wrap:wrap}
+          .so-pill{padding:9px 15px;border-radius:99px;background:#fff;border:1px solid var(--line);color:var(--ink);font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:all .12s}
+          .so-pill:hover{border-color:var(--accent);color:var(--accent)}
+          .so-pill.on{background:var(--accent);border-color:var(--accent);color:#fff}
+          .so-opt{font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}
+          .so-hint{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45}
+          .so-referr{font-size:11.5px;color:var(--accent);margin-top:6px;line-height:1.4;font-weight:600}
+          .so-input.short{max-width:180px}
+          .so-area{width:100%;font-family:inherit;font-size:13px;color:var(--ink);line-height:1.5;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px 12px;resize:vertical;outline:none;transition:all .15s}
+          .so-area:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+          .so-area::placeholder{color:var(--muted)}
 
           .so-foot{display:flex;gap:8px;padding:14px 28px;border-top:1px solid var(--line);background:#fff;flex-shrink:0}
           .so-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 16px;border-radius:10px;font-size:13px;font-weight:600;transition:all .15s;cursor:pointer;border:1px solid transparent}

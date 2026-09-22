@@ -458,7 +458,9 @@ function newBodegonRef() {
 // Prepara las dos imágenes de referencia del bodegón y las sube a Storage.
 // Devuelve { layout, blueprint_path, contactsheet_path } — con nulls si no se
 // ha podido montar (nunca lanza: la generación debe seguir adelante igual).
-async function buildBodegonAssets({ ref, normItems, layout, products }) {
+// `hint` (opcional) = lo que pidió el usuario antes de generar:
+//   { filas: 2|3, structure } — structure sale de analizar la foto de otro lote.
+async function buildBodegonAssets({ ref, normItems, layout, products, hint = null }) {
   const out = { layout: layout || null, blueprint_path: null, contactsheet_path: null };
   try {
     const catalog = products || [];
@@ -471,7 +473,9 @@ async function buildBodegonAssets({ ref, normItems, layout, products }) {
 
     const { autoLayout, renderBlueprint, renderContactSheet, loadMetrics } = await import('./composer.js');
     const metrics = await loadMetrics(entries.map(e => e.product));
-    const finalLayout = layout?.items?.length ? layout : autoLayout(entries, metrics);
+    const finalLayout = layout?.items?.length
+      ? layout
+      : autoLayout(entries, metrics, hint?.structure || null, { filas: hint?.filas });
     out.layout = finalLayout;
 
     const uniques = [...new Map(entries.map(e => [e.product.sku, e.product])).values()];
@@ -552,6 +556,7 @@ function prepareItems({ items, skus, extras, layout, layoutEditado }) {
 export async function startBodegonGeneration({
   items, extras, skus, title, description, tags,
   layout = null, instrucciones = '', layoutEditado = false, products = null,
+  layoutHint = null,
 }) {
   if (!SUPABASE_READY) throw new Error('Supabase no está conectado.');
 
@@ -566,7 +571,7 @@ export async function startBodegonGeneration({
   // imágenes: Gemini solo sostiene ~6 referencias en alta fidelidad, y por
   // encima de eso empieza a inventar etiquetas y a equivocarse de tamaños.
   // Si algo falla NO abortamos: la función sabe generar sin ellas.
-  const assets = await buildBodegonAssets({ ref, normItems, layout, products });
+  const assets = await buildBodegonAssets({ ref, normItems, layout, products, hint: layoutHint });
 
   const baseRow = {
     ref,

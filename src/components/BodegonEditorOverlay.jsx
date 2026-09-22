@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { I } from './icons.jsx';
-import { autoLayout, loadMetrics, normalizeLayoutToImages, structureFromSlots, MASK } from '../lib/composer.js';
+import { autoLayout, loadMetrics, normalizeLayoutToImages, MASK } from '../lib/composer.js';
 
 // Editor de la maqueta del bodegón.
 //
@@ -39,12 +39,9 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   const [ready, setReady] = useState(false);
   const [applying, setApplying] = useState(false);
   const [saving, setSaving] = useState(false);
-  // "Parecerse al lote nº ___": se analiza la foto de ese lote real y se
-  // recoloca todo imitando su composición.
-  const [refLote, setRefLote] = useState('');
-  const [refBusy, setRefBusy] = useState(false);
-  const [refError, setRefError] = useState('');
-  const [refUrl, setRefUrl] = useState(null);
+  // Las correcciones escritas solo hacen falta si se va a regenerar, así que
+  // se piden en una ventanita al pulsar "Regenerar" y no estorban al editar.
+  const [pidiendoRegen, setPidiendoRegen] = useState(false);
   const stageRef = useRef(null);
   const wrapRef = useRef(null);
   const dragState = useRef(null);
@@ -300,35 +297,6 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
   const reset = () => {
     setItems(autoLayout(entries, metricsRef.current).items);
     setSel(null);
-    setRefUrl(null);
-    setRefError('');
-  };
-
-  // Recolocar imitando la composición de un lote real ya fotografiado.
-  const aplicarReferencia = async () => {
-    const n = refLote.trim();
-    if (!/^\d{1,5}$/.test(n)) { setRefError('Escribe solo el número del lote, por ejemplo 311.'); return; }
-    setRefBusy(true);
-    setRefError('');
-    try {
-      const res = await fetch('/api/analyze-lote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lote: n }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'No se pudo analizar ese lote.');
-      const structure = structureFromSlots(data.slots);
-      if (!structure) throw new Error('No se han reconocido suficientes productos en esa foto.');
-      setItems(autoLayout(entries, metricsRef.current, structure).items);
-      setSel(null);
-      setRefUrl(data.url || null);
-      setShowRef(false);
-    } catch (e) {
-      setRefError(e.message || 'Error analizando el lote.');
-    } finally {
-      setRefBusy(false);
-    }
   };
 
   // Se mantiene el editor abierto (en modo "aplicando") hasta que la nueva
@@ -338,6 +306,7 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
 
   const apply = async () => {
     if (applying || saving) return;
+    setPidiendoRegen(false);
     setApplying(true);
     try {
       await onApply?.({
@@ -389,8 +358,8 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
               onPointerDown={onStagePointerDown}
               style={stageSize.w ? { width: stageSize.w, height: stageSize.h } : undefined}
             >
-              {showRef && (refUrl || gen.image) && (
-                <img className="bed-under" src={refUrl || gen.image} alt="" draggable={false}/>
+              {showRef && gen.image && (
+                <img className="bed-under" src={gen.image} alt="" draggable={false}/>
               )}
               {!ready && <div className="bed-loading">Preparando la maqueta…</div>}
               {ready && items.map((it, i) => {
@@ -473,13 +442,13 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
             <button className="bed-tool" disabled={sel == null} onClick={() => rotateSel(15)} title="Girar a la derecha">↻</button>
             <div className="bed-tool-sep"/>
             <button className="bed-tool" onClick={reset}>{I.refresh({ size: 13 })} Reiniciar</button>
-            {(refUrl || gen.image) && (
+            {gen.image && (
               <button
                 className={`bed-tool ${showRef ? 'on' : ''}`}
                 onClick={() => setShowRef(v => !v)}
                 title="Superpone la foto en transparencia para comparar"
               >
-                {I.expand({ size: 13 })} {refUrl ? `Ver lote ${refLote}` : 'Comparar con la foto'}
+                {I.expand({ size: 13 })} Comparar con la foto
               </button>
             )}
           </div>
@@ -489,30 +458,6 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
           <h2 className="bed-title">{gen.title}</h2>
           <div className="bed-sub">
             {items.length} {items.length === 1 ? 'unidad' : 'unidades'} en la maqueta
-          </div>
-
-          <div className="bed-section-h">Copiar la colocación de otro lote</div>
-          <div className="bed-refrow">
-            <input
-              className="bed-refinput"
-              value={refLote}
-              onChange={e => { setRefLote(e.target.value.replace(/\D/g, '')); setRefError(''); }}
-              onKeyDown={e => { if (e.key === 'Enter') aplicarReferencia(); }}
-              placeholder="Nº de lote"
-              inputMode="numeric"
-            />
-            <button className="bed-tool" onClick={aplicarReferencia} disabled={refBusy || !refLote}>
-              {refBusy ? 'Analizando…' : 'Aplicar'}
-            </button>
-          </div>
-          {refError && <div className="bed-referr">{refError}</div>}
-          {refUrl && !refError && (
-            <div className="bed-refok">
-              Colocado imitando el lote {refLote}. Retócalo a mano si hace falta.
-            </div>
-          )}
-          <div className="bed-note-hint">
-            Coge una foto de lote ya subida y reparte estos productos como estaban allí.
           </div>
 
           {selProduct && (
@@ -533,18 +478,6 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
             </div>
           )}
 
-          <div className="bed-section-h">Qué está mal en la foto</div>
-          <textarea
-            className="bed-notes"
-            value={instrucciones}
-            onChange={e => setInstrucciones(e.target.value)}
-            rows={7}
-            placeholder={'Por ejemplo: la botella de vino sale dos veces, solo va una.'}
-          />
-          <div className="bed-note-hint">
-            Cuanto más concreto, mejor.
-          </div>
-
           <div className="bed-actions">
             <button
               className="bed-btn bed-btn-primary"
@@ -564,18 +497,46 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
               </button>
               <button
                 className="bed-btn bed-btn-ghost"
-                onClick={apply}
+                onClick={() => setPidiendoRegen(true)}
                 disabled={!ready || applying || saving}
-                title="Le manda esta maqueta a la IA para que haga una foto de estudio. La colocación puede cambiar."
+                title="Le manda esta maqueta a la IA para que haga una foto nueva. La colocación puede cambiar."
               >
                 {applying
                   ? <>Regenerando…</>
-                  : <>{I.sparkle({ size: 14 })} Regenerar con IA</>}
+                  : <>{I.sparkle({ size: 14 })} Regenerar</>}
               </button>
             </div>
           </div>
         </aside>
       </div>
+
+      {pidiendoRegen && (
+        <div className="bed-ask" onClick={() => setPidiendoRegen(false)}>
+          <div className="bed-ask-box" onClick={e => e.stopPropagation()}>
+            <h3 className="bed-ask-t">Qué está mal en la foto</h3>
+            <p className="bed-ask-s">
+              Se hará una foto nueva a partir de tu composición. La colocación puede cambiar.
+            </p>
+            <textarea
+              className="bed-notes"
+              value={instrucciones}
+              onChange={e => setInstrucciones(e.target.value)}
+              rows={6}
+              autoFocus
+              placeholder={'Por ejemplo: la botella de vino sale dos veces, solo va una.'}
+            />
+            <div className="bed-note-hint">Cuanto más concreto, mejor.</div>
+            <div className="bed-ask-actions">
+              <button className="bed-btn bed-btn-ghost" onClick={() => setPidiendoRegen(false)} disabled={applying}>
+                Cancelar
+              </button>
+              <button className="bed-btn bed-btn-primary" onClick={apply} disabled={applying}>
+                {applying ? <>Regenerando…</> : <>{I.sparkle({ size: 14 })} Regenerar</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .bed-back{position:fixed;inset:0;background:rgba(20,16,12,.68);backdrop-filter:blur(10px);z-index:700;display:grid;place-items:center;padding:28px;animation:fadeIn .2s ease}
@@ -646,11 +607,6 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         .bed-notes::placeholder{color:var(--muted);font-size:12px;line-height:1.5}
         .bed-note-hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.45}
 
-        .bed-refrow{display:flex;gap:6px}
-        .bed-refinput{flex:1;min-width:0;font-family:inherit;font-size:13px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:9px;padding:8px 11px;outline:none;font-variant-numeric:tabular-nums;transition:all .15s}
-        .bed-refinput:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-        .bed-referr{margin-top:6px;font-size:11.5px;color:var(--accent);line-height:1.4}
-        .bed-refok{margin-top:6px;font-size:11.5px;color:#3a7a5a;line-height:1.4}
 
         .bed-actions{display:flex;flex-direction:column;gap:8px;margin-top:auto;padding-top:18px}
         .bed-actions-row{display:flex;gap:8px}
@@ -661,6 +617,12 @@ export default function BodegonEditorOverlay({ open, gen, products, onClose, onA
         .bed-btn-ghost:hover:not(:disabled){border-color:var(--ink)}
         .bed-btn-primary{background:var(--accent);color:#fff;box-shadow:0 4px 12px -4px rgba(167,77,74,.45)}
         .bed-btn-primary:hover:not(:disabled){background:var(--accent-2);transform:translateY(-1px)}
+
+        .bed-ask{position:absolute;inset:0;background:rgba(20,16,12,.55);backdrop-filter:blur(4px);display:grid;place-items:center;z-index:900;padding:24px;animation:fadeIn .15s ease}
+        .bed-ask-box{background:#fff;border-radius:16px;padding:24px;width:min(460px,100%);box-shadow:0 30px 70px -20px rgba(0,0,0,.45);animation:popIn .25s cubic-bezier(.2,.8,.2,1)}
+        .bed-ask-t{font-family:'Fraunces',serif;font-size:19px;font-weight:500;color:var(--ink);margin:0 0 6px}
+        .bed-ask-s{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0 0 14px}
+        .bed-ask-actions{display:flex;gap:8px;margin-top:16px}
 
         @media (max-width: 1040px){
           .bed-modal{grid-template-columns:1fr;max-height:96vh}

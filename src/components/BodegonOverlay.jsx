@@ -173,7 +173,7 @@ export default function BodegonOverlay({
             disabled={generating}
             title="Coloca los productos a mano y di qué está mal antes de volver a generar"
           >
-            {I.edit({ size: 14 })} Editar y regenerar
+            {I.edit({ size: 14 })} Editar
           </button>
         </div>
 

@@ -30,6 +30,9 @@ export const CANVAS_H = 1536;
 
 // Líneas de suelo de cada altura, en fracción del alto del lienzo.
 const BASELINE = { TRASERA: 0.80, MEDIA: 0.90, DELANTERA: 0.985 };
+// Con dos alturas la de atrás baja: si se quedara en 0.80 habría una franja
+// vacía en medio, justo donde antes iba la fila del centro.
+const BASELINE_2 = { TRASERA: 0.88, DELANTERA: 0.985 };
 // Cuánto del ancho del lienzo puede ocupar una fila como máximo.
 const ROW_MAX_W = 0.94;
 // El producto más alto ocupará esta fracción del alto del lienzo.
@@ -147,11 +150,17 @@ export function visualProminence(p) {
   return Math.max(w, h);
 }
 
-function tierOf(p) {
+// En qué altura va un producto. Con `filas = 2` no hay fila del centro: cada
+// producto cae a la de atrás o a la de delante según lo alto que sea.
+function tierOf(p, filas = 3) {
   if (isJamon(p)) return 'DELANTERA';
   const explicit = String(p?.posicion || '').toUpperCase();
-  if (['TRASERA', 'MEDIA', 'DELANTERA'].includes(explicit)) return explicit;
   const { h } = realSize(p);
+  if (filas === 2) {
+    if (explicit === 'TRASERA' || explicit === 'DELANTERA') return explicit;
+    return h >= 16 ? 'TRASERA' : 'DELANTERA';
+  }
+  if (['TRASERA', 'MEDIA', 'DELANTERA'].includes(explicit)) return explicit;
   if (h >= 24) return 'TRASERA';
   if (h >= 10) return 'MEDIA';
   return 'DELANTERA';
@@ -357,7 +366,12 @@ export function structureFromSlots(slots) {
 // nada y para descontar el aire de los recortes.
 // `ref` (opcional) = estructura sacada de un lote real (structureFromSlots):
 // si viene, la composición imita la de ese lote.
-export function autoLayout(entries, metrics, ref = null) {
+// `opts.filas` (opcional) = 2 ó 3 alturas. Por defecto 3.
+export function autoLayout(entries, metrics, ref = null, opts = {}) {
+  const filas = opts.filas === 2 ? 2 : 3;
+  const TIERS = filas === 2 ? ['TRASERA', 'DELANTERA'] : ['TRASERA', 'MEDIA', 'DELANTERA'];
+  const suelo = (tier) => ref?.baselines?.[tier]
+    ?? (filas === 2 ? BASELINE_2[tier] : BASELINE[tier]);
   const units = [];
   for (const { product, qty } of entries) {
     for (let i = 0; i < (qty || 1); i++) units.push(product);
@@ -374,11 +388,12 @@ export function autoLayout(entries, metrics, ref = null) {
   const tallestFrac = ref?.tallestFrac || TALLEST_FRAC;
   const pxPerCm = (CANVAS_H * tallestFrac) / tallestCm;
 
-  const rows = { TRASERA: [], MEDIA: [], DELANTERA: [] };
+  const rows = {};
+  for (const t of TIERS) rows[t] = [];
   const jamones = [];
   for (const u of units) {
     if (isJamon(u)) jamones.push(u);
-    else rows[tierOf(u)].push(u);
+    else rows[tierOf(u, filas)].push(u);
   }
 
   // Dentro de cada fila, los más altos hacia el centro queda más natural.
@@ -398,7 +413,7 @@ export function autoLayout(entries, metrics, ref = null) {
   // las apunta.
   const plan = {};
   let shrink = 1;
-  for (const tier of ['TRASERA', 'MEDIA', 'DELANTERA']) {
+  for (const tier of TIERS) {
     const list = rows[tier];
     if (!list.length) continue;
     const suma = list.reduce((s, p) => s + sizeCm.get(p).vis.w * pxPerCm, 0);
@@ -415,7 +430,7 @@ export function autoLayout(entries, metrics, ref = null) {
 
   const items = [];
   let z = 0;
-  for (const tier of ['TRASERA', 'MEDIA', 'DELANTERA']) {
+  for (const tier of TIERS) {
     const list = rows[tier];
     if (!list.length) continue;
 
@@ -434,7 +449,7 @@ export function autoLayout(entries, metrics, ref = null) {
     const total = plan[tier].total * shrink;
 
     let x = centro * CANVAS_W - total / 2;   // x = borde izquierdo VISIBLE del siguiente
-    const baseY = CANVAS_H * (ref?.baselines?.[tier] ?? BASELINE[tier]);
+    const baseY = CANVAS_H * suelo(tier);
 
     for (const { p, trim, boxW, boxH, visW } of sizes) {
       const bw = boxW * shrink;
@@ -467,7 +482,7 @@ export function autoLayout(entries, metrics, ref = null) {
     const maxVis = CANVAS_W * 0.50;
     const visW = vis.w * pxPerCm * shrink;
     if (visW > maxVis) { const k = maxVis / visW; dw *= k; dh *= k; }
-    const baseJamon = (ref?.baselines?.DELANTERA ?? BASELINE.DELANTERA) - 0.08;
+    const baseJamon = suelo('DELANTERA') - 0.08;
     items.push({
       sku: p.sku,
       x: (CANVAS_W * (0.50 + i * 0.06) - dw / 2) / CANVAS_W,

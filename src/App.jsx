@@ -207,7 +207,7 @@ export default function App() {
   // Arranca una generación nueva. Se PERMITE tener varias en cola (multi-gen):
   // al lanzarla se añade a `activeGens` y se abre el overlay para verla. Si
   // ya hay otra abierta, se minimiza y la nueva pasa al primer plano.
-  const startBodegon = async ({ items, extras, title, description, tags, layout, instrucciones, layoutEditado }) => {
+  const startBodegon = async ({ items, extras, title, description, tags, layout, instrucciones, layoutEditado, layoutHint }) => {
     // `items` puede venir mezclado (productos del catálogo + extras sin foto),
     // porque al regenerar se reutiliza la lista completa del bodegón anterior.
     // Separarlos aquí evita que un extra acabe colándose como producto.
@@ -225,6 +225,7 @@ export default function App() {
         layout: layout || null,
         instrucciones: instrucciones || '',
         layoutEditado: !!layoutEditado,
+        layoutHint: layoutHint || null,   // nº de filas y lote de referencia
         products,   // el catálogo: hace falta para montar maqueta y hoja de contactos
       });
       const gen = {
@@ -291,7 +292,7 @@ export default function App() {
   }, [activeGens]);
 
   // Llamado desde SpecialOrderModal y BodegonEditOverlay → arranca la generación.
-  const handleSpecialOrderConfirm = ({ items, extras, title, description, tags }) => {
+  const handleSpecialOrderConfirm = ({ items, extras, title, description, tags, instrucciones, layoutHint }) => {
     if (!items || !items.length) return;
     setSpecialOrderOpen(false);
     startBodegon({
@@ -300,6 +301,8 @@ export default function App() {
       title: title || `Bodegón IA #${bodegonNumber}`,
       description: description || '',
       tags: tags || [],
+      instrucciones: instrucciones || '',
+      layoutHint: layoutHint || null,
     });
   };
 
