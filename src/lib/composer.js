@@ -288,9 +288,29 @@ function drawSizeCm(p, metrics) {
 // productos y en otra cantidad. Lo que se copia es lo que de verdad define el
 // aspecto de la composición: cuánto ocupa, en cuántas alturas se reparte, a qué
 // altura apoya cada una y hasta dónde se abre a lo ancho.
+// Una fila nunca se apiña en menos de este ancho de lienzo, y su centro nunca
+// se va más allá de estos límites. Es el "sentido común" que le faltaba: si la
+// lectura de la foto de referencia sale mal (en el lote 604 dio una sola franja
+// del 73% al 96%), sin esto plantábamos la fila entera pegada a un borde.
+const EXT_MIN_W = 0.55;
+const EXT_C_MIN = 0.38;
+const EXT_C_MAX = 0.62;
+
+function normalizeExtent(min, max) {
+  const w = Math.min(0.96, Math.max(EXT_MIN_W, max - min));
+  const c = Math.min(EXT_C_MAX, Math.max(EXT_C_MIN, (min + max) / 2));
+  let a = c - w / 2;
+  let b = c + w / 2;
+  if (a < 0.02) { a = 0.02; b = a + w; }
+  if (b > 0.98) { b = 0.98; a = b - w; }
+  return { min: Math.max(0.02, a), max: Math.min(0.98, b) };
+}
+
 export function structureFromSlots(slots) {
   const list = (slots || []).filter(s => s && isFinite(s.x) && isFinite(s.y));
-  if (list.length < 2) return null;
+  // Con menos de tres productos reconocidos no hay composición que copiar:
+  // mejor avisar que inventarse una estructura a partir de dos cajas.
+  if (list.length < 3) return null;
 
   // Repartir en hasta 3 alturas cortando por los dos huecos más grandes entre
   // las bases de los productos.
@@ -318,14 +338,20 @@ export function structureFromSlots(slots) {
 
   const baselines = {};
   const extents = {};
+  // Hasta dónde se abre la composición entera: es la referencia cuando una
+  // fila no tiene suficientes productos para decir nada por sí misma.
+  const todoMin = Math.max(0, Math.min(...list.map(s => s.x)));
+  const todoMax = Math.min(1, Math.max(...list.map(s => s.x + s.w)));
   groups.forEach((g, i) => {
     const name = names[i];
     if (!name) return;
     baselines[name] = Math.min(0.995, Math.max(...g.map(s => s.bottom)));
-    extents[name] = {
-      min: Math.max(0, Math.min(...g.map(s => s.x))),
-      max: Math.min(1, Math.max(...g.map(s => s.x + s.w))),
-    };
+    // Una franja sacada de un único objeto no dice cómo se abre esa fila
+    // (podría ser un producto suelto en una esquina): se usa la de todo el
+    // conjunto, que siempre es más representativa.
+    const min = g.length >= 2 ? Math.max(0, Math.min(...g.map(s => s.x))) : todoMin;
+    const max = g.length >= 2 ? Math.min(1, Math.max(...g.map(s => s.x + s.w))) : todoMax;
+    extents[name] = normalizeExtent(min, max);
   });
   // Si la foto solo daba 1 o 2 alturas, se completan las que falten.
   if (!baselines.TRASERA) baselines.TRASERA = (baselines.MEDIA ?? 0.8) - 0.10;

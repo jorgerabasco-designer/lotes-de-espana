@@ -12,11 +12,19 @@
 //
 // El resultado se cachea en la tabla `settings` (clave `ref_layout_<lote>`):
 // la foto de un lote no cambia, así que se analiza una sola vez.
+//
+// ANALYSIS_VERSION: cuando se afina la detección hay que poder rehacer las
+// lecturas viejas, o una foto mal leída se queda mal leída para siempre (le
+// pasó al lote 604: tomó el lazo por un producto y se saltó una botella).
+// Subiendo este número, cada lote se vuelve a analizar UNA vez la próxima vez
+// que se pida. Sin botones: nadie tiene que acordarse de nada.
 
 import { createClient } from '@supabase/supabase-js';
 
 // Se prueban por orden hasta que uno responda: así no dependemos de que un id
 // de modelo concreto siga vivo.
+const ANALYSIS_VERSION = 2;
+
 const MODEL_CANDIDATES = [
   process.env.GEMINI_VISION_MODEL,
   'gemini-2.5-flash',
@@ -27,14 +35,29 @@ const MODEL_CANDIDATES = [
 const PROMPT = `This is a photograph of a Spanish gourmet gift hamper (cesta de Navidad).
 
 Detect every individual PRODUCT visible in it: bottles, boxes, tins, jars,
-packets, cured meat pieces, etc.
+packets, cured meat pieces, and the presentation bag or case they are
+presented with.
+
+Work in two steps:
+1. Count the products you can see, one by one, including every single bottle.
+2. Return exactly that many boxes — one per product unit.
 
 Rules:
-- One box per product unit. If the same product appears twice, return two boxes.
-- Include partially hidden products (give the box of the visible part).
-- Do NOT return a box for: the basket, tray, crate or box that contains
-  everything; the background; ribbons, shredded filler or decorations.
-- Do NOT return one giant box covering the whole arrangement.
+- ONE BOX PER UNIT. Two bottles standing side by side are two boxes, never
+  one. Never merge neighbouring products into a single box.
+- Do not miss the products at the far left and far right edges: they are
+  often cropped or in shadow, but they are products.
+- Include partially hidden products (give the box of the visible part only).
+- A bottle lying down in front is one product; anything scattered around it
+  (decorative grapes, berries, pine cones, nuts) is NOT part of it and is NOT
+  a product.
+- Do NOT return a box for: ribbons, bows or decorative fabric; shredded
+  filler, foliage or decorations; the wicker basket, tray or crate holding
+  everything; printed artwork on a bag (a wine glass printed on the bag is
+  not a glass); shadows and reflections; the background.
+- Do NOT return one giant box covering the whole arrangement, and do not
+  return wide flat strips that span the whole picture — those are ribbons or
+  edges, not products.
 
 Return ONLY a JSON array, no prose, where each element is:
 {"box_2d": [ymin, xmin, ymax, xmax], "label": "short product type"}
@@ -66,7 +89,8 @@ export const handler = async (event) => {
   if (!body.force) {
     try {
       const { data } = await supabase.from('settings').select('value').eq('key', cacheKey).maybeSingle();
-      if (data?.value?.slots?.length) {
+      // Solo vale la caché si la hizo esta versión de la detección.
+      if (data?.value?.slots?.length && data.value.v === ANALYSIS_VERSION) {
         return json(200, { ...data.value, cached: true });
       }
     } catch {}
@@ -132,7 +156,7 @@ export const handler = async (event) => {
     return json(422, { error: 'No se han reconocido productos en la foto de ese lote.' });
   }
 
-  const payload = { slots, n: slots.length, url, lote };
+  const payload = { slots, n: slots.length, url, lote, v: ANALYSIS_VERSION };
 
   // 4) Cachear (si falla, da igual: solo significa reanalizar la próxima vez)
   try {
@@ -168,8 +192,22 @@ function parseSlots(raw) {
     if (w <= 0.01 || h <= 0.01) continue;      // ruido
     if (w > 0.9 && h > 0.9) continue;           // la cesta entera
     if (w * h > 0.55) continue;                 // demasiado grande para un producto
+    // Franja ancha y plana de lado a lado: es un lazo, el borde de una caja o
+    // una sombra. Ningún producto de una cesta tiene esa forma.
+    if (w > 0.7 && w / h > 5) continue;
     out.push({ x, y, w, h, label: String(it.label || '').slice(0, 40) });
   }
+
+  // Cajas casi calcadas (el modelo a veces devuelve la misma dos veces): se
+  // queda la primera. Si no, cuentan como dos productos donde hay uno.
+  const unicas = [];
+  for (const s of out) {
+    const dup = unicas.some(u => Math.abs(u.x - s.x) < 0.04 && Math.abs(u.y - s.y) < 0.04
+                              && Math.abs(u.w - s.w) < 0.06 && Math.abs(u.h - s.h) < 0.06);
+    if (!dup) unicas.push(s);
+  }
+  out.length = 0;
+  out.push(...unicas);
   // De atrás hacia delante, que es como se monta la composición.
   out.sort((a, b) => (a.y + a.h) - (b.y + b.h));
   return out;
