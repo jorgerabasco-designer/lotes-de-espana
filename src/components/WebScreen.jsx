@@ -13,8 +13,13 @@ import {
   getEtiquetaUrlByRef, getLotePhotoUrl,
   ALLOWED_LABEL_EXTS, ALLOWED_LOTE_EXTS, ALLOWED_EXCEL_EXTS,
 } from '../lib/web-files.js';
-import { generateEtiquetasPDF, generateDescripcionPDF } from '../lib/pdf-lotes.js';
+import { generateEtiquetasPDF, generateDescripcionPDF, nameBrandRuns } from '../lib/pdf-lotes.js';
 import { SUPABASE_READY } from '../lib/supabase.js';
+import SpecialLoteModal from './SpecialLoteModal.jsx';
+import {
+  listLotesEspeciales, saveLoteEspecial, deleteLoteEspecial,
+  uploadFotoLoteEspecial, fotoUrlLoteEspecial,
+} from '../lib/special-lotes.js';
 
 // Helpers de formato
 function formatDate(iso) {
@@ -260,7 +265,7 @@ function tipoFromNomenclatura(nombrePdf) {
     .toUpperCase() || null;
 }
 
-export default function WebScreen({ showInfo }) {
+export default function WebScreen({ showInfo, products }) {
   // ---- Excel maestro (catálogo con productos por lote) ----
   const [excel, setExcel] = useState(null);       // { path, url, size, updatedAt }
   const [excelBuffer, setExcelBuffer] = useState(null);
@@ -593,6 +598,94 @@ export default function WebScreen({ showInfo }) {
     document.body.appendChild(a); a.click(); a.remove();
   };
 
+  // ---- Lotes especiales (a medida, fuera del catálogo) ----
+  const [especialOpen, setEspecialOpen] = useState(false);
+  const [especialInicial, setEspecialInicial] = useState(null);
+  const [especiales, setEspeciales] = useState([]);
+  const [buscaEspecial, setBuscaEspecial] = useState('');
+
+  useEffect(() => {
+    if (!SUPABASE_READY) return;
+    listLotesEspeciales().then(setEspeciales).catch(e => console.warn('[especiales]', e));
+  }, []);
+
+  const especialesFiltrados = useMemo(() => {
+    const q = buscaEspecial.trim().toUpperCase();
+    if (!q) return especiales;
+    return especiales.filter(l =>
+      (l.ref || '').toUpperCase().includes(q) || (l.titulo || '').toUpperCase().includes(q));
+  }, [especiales, buscaEspecial]);
+
+  // Genera los 3 PDFs de un lote especial y, si lo han pedido, lo guarda.
+  const generarEspecial = async (datos) => {
+    const { ref, titulo, nombrePdf, precio, productos, fotoFile, guardar, slug } = datos;
+
+    // Foto: si han subido una nueva se sube ahora; si no, se reusa la guardada.
+    let fotoPath = datos.fotoPath || null;
+    if (fotoFile) {
+      const up = await uploadFotoLoteEspecial(fotoFile, slug);
+      if (!up.ok) throw new Error(up.error || 'No se pudo subir la foto.');
+      fotoPath = up.path;
+    }
+    const fotoUrl = fotoPath ? fotoUrlLoteEspecial(fotoPath, Date.now()) : null;
+
+    // El listado del PDF: aquí no hay Excel maestro con el formato rico, así
+    // que la marca se resalta por su cuenta (va en MAYÚSCULAS en sus textos).
+    const lineas = productos.map(p => ({
+      ref: p.ref || null,
+      uds: p.uds || 1,
+      descripcion: p.descripcion || '',
+      runs: nameBrandRuns(p.descripcion || '', ''),
+    }));
+
+    const zip = new JSZip();
+    const carpetaCon = zip.folder('QR CON PRECIO');
+    const carpetaSin = zip.folder('QR SIN PRECIO');
+    const nombreBase = nombrePdf.replace(/\.pdf$/i, '');
+
+    const conUrls = await Promise.all(lineas.map(async (p) => ({
+      ...p,
+      url: p.ref ? await getEtiquetaUrlByRef(p.ref) : null,
+    })));
+    const etiquetas = await generateEtiquetasPDF({ loteNumero: ref, productos: conUrls });
+    zip.file(`${nombreBase} - Etiquetas.pdf`, etiquetas.blob);
+
+    const con = await generateDescripcionPDF({
+      loteNumero: ref, tipoLote: titulo, loteFotoUrl: fotoUrl, productos: lineas,
+      precio, pieLegal: PIE_LEGAL, headerVariant: 'con-precio',
+    });
+    carpetaCon.file(nombrePdf, con);
+
+    const sin = await generateDescripcionPDF({
+      loteNumero: ref, tipoLote: titulo, loteFotoUrl: fotoUrl, productos: lineas,
+      precio: null, pieLegal: PIE_LEGAL, headerVariant: 'sin-precio',
+    });
+    carpetaSin.file(nombrePdf, sin);
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    if (lastZip?.url) { try { URL.revokeObjectURL(lastZip.url); } catch {} }
+    setLastZip({
+      url: URL.createObjectURL(content),
+      filename: `${nombreBase}.zip`,
+      size: content.size,
+      count: 1,
+      errores: [],
+      missingByLote: etiquetas.missing?.length ? { [ref]: etiquetas.missing } : {},
+    });
+
+    if (guardar || especialInicial) {
+      await saveLoteEspecial({ slug, ref, titulo, nombrePdf, precio, productos, fotoPath });
+      setEspeciales(await listLotesEspeciales());
+    }
+    setEspecialOpen(false);
+    setEspecialInicial(null);
+  };
+
+  const borrarEspecial = async (lote) => {
+    await deleteLoteEspecial(lote.slug);
+    setEspeciales(await listLotesEspeciales());
+  };
+
   // ---- Borrado desde el listado modal ----
   const handleDeleteEtiqueta = async (item) => {
     const res = await deleteEtiqueta(item.path);
@@ -613,6 +706,12 @@ export default function WebScreen({ showInfo }) {
           <h1 className="cat-title">PDFs Web</h1>
           <p className="cat-sub">Genera los PDFs de las fichas de lote — etiquetas traseras y QR con o sin precio — a partir del Excel del catálogo.</p>
         </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => { setEspecialInicial(null); setEspecialOpen(true); }}
+        >
+          {I.sparkle({ size: 14 })} Lote especial
+        </button>
       </header>
 
       {!SUPABASE_READY && (
@@ -683,6 +782,63 @@ export default function WebScreen({ showInfo }) {
           </button>
         )}
       </div>
+
+      {/* ---- 1b. Lotes especiales guardados ---- */}
+      {especiales.length > 0 && (
+        <div className="web-block">
+          <div className="web-blockh">
+            <h3>Lotes especiales</h3>
+            <p>Los lotes a medida que no están en el catálogo. Pulsa uno para volver a generar sus PDFs sin subir nada.</p>
+          </div>
+          <input
+            className="lote-input esp-busca"
+            type="text"
+            placeholder="Buscar por nombre — ej. ALTADIA"
+            value={buscaEspecial}
+            onChange={e => setBuscaEspecial(e.target.value)}
+          />
+          <div className="esp-list">
+            {especialesFiltrados.map(l => (
+              <div key={l.slug} className="esp-item">
+                <div className="esp-thumb">
+                  {l.fotoUrl ? <img src={l.fotoUrl} alt=""/> : <span>—</span>}
+                </div>
+                <div className="esp-info">
+                  <div className="esp-ref">{l.ref}</div>
+                  <div className="esp-meta">
+                    {l.productos.length} producto{l.productos.length === 1 ? '' : 's'}
+                    {l.precio != null && ` · ${l.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })} € + IVA`}
+                    {l.updatedAt && ` · ${formatDate(l.updatedAt)}`}
+                  </div>
+                </div>
+                <button
+                  className="btn btn-ghost esp-btn"
+                  onClick={() => { setEspecialInicial(l); setEspecialOpen(true); }}
+                >
+                  Regenerar
+                </button>
+                <button
+                  className="esp-del"
+                  onClick={() => showInfo?.({
+                    icon: 'trash', tone: 'danger',
+                    title: `¿Borrar el lote ${l.ref}?`,
+                    description: 'Se borran sus datos y su foto. Los PDFs que ya te hayas descargado no se tocan.',
+                    cancelLabel: 'Cancelar',
+                    confirmLabel: 'Borrar', confirmTone: 'danger',
+                    onConfirm: () => borrarEspecial(l).catch(e => console.error(e)),
+                  })}
+                  aria-label="Borrar"
+                >
+                  {I.trash ? I.trash({ size: 14 }) : '×'}
+                </button>
+              </div>
+            ))}
+            {!especialesFiltrados.length && (
+              <div className="esp-empty">No hay ninguno que se llame así.</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ---- 2. Etiquetas & Fotos de lotes (2 columnas) ---- */}
       <div className="web-two-col">
@@ -867,6 +1023,19 @@ export default function WebScreen({ showInfo }) {
         .web-count-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:var(--muted);flex-wrap:wrap}
         .web-count-row .btn{padding:7px 12px;font-size:12px}
 
+          .esp-busca{width:100%;margin-bottom:12px}
+          .esp-list{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+          .esp-item{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line)}
+          .esp-item:last-child{border-bottom:none}
+          .esp-thumb{width:40px;height:46px;border-radius:7px;border:1px solid var(--line);background:var(--paper);display:grid;place-items:center;flex-shrink:0;overflow:hidden;color:var(--muted);font-size:11px}
+          .esp-thumb img{width:100%;height:100%;object-fit:contain}
+          .esp-info{flex:1;min-width:0}
+          .esp-ref{font-size:13.5px;font-weight:600;color:var(--ink)}
+          .esp-meta{font-size:11.5px;color:var(--muted);margin-top:2px}
+          .esp-btn{padding:7px 13px;font-size:12px}
+          .esp-del{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:transparent;border:1px solid transparent;color:var(--muted);cursor:pointer;flex-shrink:0}
+          .esp-del:hover{border-color:var(--accent);color:var(--accent)}
+          .esp-empty{padding:18px;text-align:center;color:var(--muted);font-size:12.5px}
         .lote-input-row{display:flex;gap:10px;flex-wrap:wrap}
         .lote-input{flex:1;font-family:inherit;font-size:14px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;outline:none;transition:all .15s;min-width:260px}
         .lote-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -899,6 +1068,14 @@ export default function WebScreen({ showInfo }) {
         .pdf-name{font-size:13px;font-weight:600;color:var(--ink)}
         .pdf-meta{font-size:11px;color:var(--muted);margin-top:2px}
       `}</style>
+      <SpecialLoteModal
+        open={especialOpen}
+        products={products}
+        initial={especialInicial}
+        onClose={() => { setEspecialOpen(false); setEspecialInicial(null); }}
+        onGenerate={generarEspecial}
+      />
+
     </section>
   );
 }

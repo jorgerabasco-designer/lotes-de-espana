@@ -635,7 +635,7 @@ export default function App() {
 
       {!loading && active === 'settings' && <SettingsScreen products={products} onProductsChanged={refreshProducts}/>}
 
-      {!loading && active === 'web' && <WebScreen showInfo={showInfo}/>}
+      {!loading && active === 'web' && <WebScreen showInfo={showInfo} products={products}/>}
 
       <ProductEditOverlay
         open={editOpen}

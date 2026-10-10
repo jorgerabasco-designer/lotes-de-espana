@@ -246,18 +246,149 @@ export async function parsePdfOrder(file) {
   if (clienteShort && lote) title = `${clienteShort} — ${lote}`;
   else title = clienteShort || lote || '';
 
-  // Extracción de referencias: regex global. Importante: deduplicamos por ref,
-  // sumando cantidades cuando una ref aparece varias veces.
-  const matches = fullText.match(REF_RE) || [];
-  const counts = new Map();
-  for (const m of matches) counts.set(m, (counts.get(m) || 0) + 1);
-
-  const items = [];
-  for (const [ref, qty] of counts) {
-    items.push({ ref, qty, raw: '' });
+  // Extracción de referencias, descripciones y cantidades.
+  //
+  // Hay dos formas en que estos PDF sueltan el texto, y hay que cubrir las dos:
+  //   · POR FILAS  → "07IB043 Paleta Cebo 50% ... 1 UND" en una sola línea.
+  //   · POR COLUMNAS → primero las 20 referencias seguidas, luego las 20
+  //     descripciones, luego los UND y luego las cantidades. Así lo saca el
+  //     presupuesto de su ERP, y es el caso que importa.
+  const lineas = fullText.split('\n');
+  let items = itemsPorFilas(lineas);
+  const sinDesc = items.filter(it => !it.desc).length;
+  if (!items.length || sinDesc > items.length / 2) {
+    const porBloques = itemsPorColumnas(lineas);
+    if (porBloques.length) {
+      // Se conservan las cantidades de la pasada por filas si allí salieron.
+      const previo = new Map(items.map(it => [it.ref, it]));
+      items = porBloques.map(it => ({ ...it, qty: it.qty || previo.get(it.ref)?.qty || 1 }));
+    }
   }
 
-  return { title, items, rawText: fullText, cliente, lote };
+  // Red de seguridad: si nada de lo anterior encontró productos, se vuelve al
+  // recuento global de siempre (sin descripciones, pero con las referencias).
+  if (!items.length) {
+    const matches = fullText.match(REF_RE) || [];
+    const counts = new Map();
+    for (const m of matches) counts.set(m, (counts.get(m) || 0) + 1);
+    items = [...counts].map(([ref, qty]) => ({ ref, qty, raw: '', desc: '' }));
+  }
+
+  // Cabecera del lote en el presupuesto: la línea del artículo "LOTE", que
+  // lleva su referencia comercial, el título y el precio unitario.
+  const { referencia, titulo, precio } = cabeceraLote(lineas);
+
+  return { title, items, rawText: fullText, cliente, lote, referencia, titulo, precio };
+}
+
+const SOLO_REF_RE = /^\s*[0-9]{2}[A-Z]{2}[0-9]{3}\s*$/;
+const UNA_REF_RE  = /\b[0-9]{2}[A-Z]{2}[0-9]{3}\b/;
+
+// PDF que saca cada producto en su propia línea, con todo junto.
+function itemsPorFilas(lineas) {
+  const porRef = new Map();
+  for (const linea of lineas) {
+    if (SOLO_REF_RE.test(linea)) continue;          // eso es formato columnas
+    const m = linea.match(UNA_REF_RE);
+    if (!m) continue;
+    const ref = m[0];
+    const mUds = linea.match(/(\d{1,3})\s*(?:UND|UDS?|UNID)\b/i);
+    const qty = mUds ? Math.max(1, parseInt(mUds[1], 10)) : 1;
+    const desc = linea.slice(linea.indexOf(ref) + ref.length)
+      .replace(/\s+\d{1,3}\s*(?:UND|UDS?|UNID)\b.*$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    const prev = porRef.get(ref);
+    if (prev) { prev.qty += qty; if (!prev.desc && desc) prev.desc = desc; }
+    else porRef.set(ref, { ref, qty, desc, raw: linea.trim() });
+  }
+  return [...porRef.values()];
+}
+
+// PDF que saca el texto columna a columna: un bloque con todas las
+// referencias, otro con todas las descripciones y otro con las cantidades,
+// los tres en el MISMO orden. Se emparejan por posición.
+function itemsPorColumnas(lineas) {
+  const out = [];
+  const esRuido = (l) => {
+    const t = (l || '').trim();
+    return !t || /^(UND|UDS?|UNID)$/i.test(t);
+  };
+  const esEntero = (l) => /^\d{1,3}$/.test((l || '').trim());
+
+  let i = 0;
+  while (i < lineas.length) {
+    if (!SOLO_REF_RE.test(lineas[i])) { i++; continue; }
+
+    const refs = [];
+    while (i < lineas.length && SOLO_REF_RE.test(lineas[i])) { refs.push(lineas[i].trim()); i++; }
+
+    // Descripciones: el siguiente bloque de líneas con texto, saltándose los
+    // "UND" sueltos. Se cogen como mucho tantas como referencias haya.
+    let j = i;
+    while (j < lineas.length && esRuido(lineas[j])) j++;
+    const descs = [];
+    while (j < lineas.length && descs.length < refs.length) {
+      const t = (lineas[j] || '').trim();
+      if (!t || SOLO_REF_RE.test(t) || /^(UND|UDS?|UNID)$/i.test(t) || esEntero(t)) break;
+      descs.push(t); j++;
+    }
+
+    // Cantidades: un bloque de enteros sueltos, exactamente tantos como
+    // referencias. Si no cuadra, se deja 1 y que lo revisen en pantalla.
+    let k = j;
+    while (k < lineas.length && esRuido(lineas[k])) k++;
+    const udsRaw = [];
+    while (k < lineas.length && udsRaw.length < refs.length && esEntero(lineas[k])) {
+      udsRaw.push(parseInt(lineas[k].trim(), 10)); k++;
+    }
+    const uds = udsRaw.length === refs.length ? udsRaw : null;
+
+    refs.forEach((ref, idx) => {
+      out.push({ ref, qty: uds ? Math.max(1, uds[idx]) : 1, desc: descs[idx] || '', raw: '' });
+    });
+    i = Math.max(i, j);
+  }
+
+  // Si una referencia sale repetida (dos páginas con el mismo producto) se
+  // suman sus cantidades.
+  const porRef = new Map();
+  for (const it of out) {
+    const prev = porRef.get(it.ref);
+    if (prev) { prev.qty += it.qty; if (!prev.desc && it.desc) prev.desc = it.desc; }
+    else porRef.set(it.ref, { ...it });
+  }
+  return [...porRef.values()];
+}
+
+// Saca referencia comercial, título y precio de la línea de cabecera del lote.
+// Es "mejor esfuerzo": lo que salga se le propone al usuario para que lo
+// confirme o lo corrija, nunca se usa a ciegas.
+function cabeceraLote(lineas) {
+  const out = { referencia: '', titulo: '', precio: null };
+  // Ojo: REF_RE lleva la bandera /g y .test() va guardando posición entre
+  // llamadas, así que aquí se usa UNA_REF_RE, que no la lleva.
+  const linea = (lineas || []).find(l => /\bLOTE\b/i.test(l) && /\(/.test(l) && !UNA_REF_RE.test(l));
+  if (!linea) return out;
+
+  // Referencia: el PRIMER bloque de la línea. En la tabla, la columna
+  // PRODUCTO va antes que todo lo demás:
+  //   "ALTADIA-1   100,00   100,00 LOTE ESP. ALTADIA-1 ( PALETA IBÉRICA ) 1 UND"
+  const mRef = linea.trim().match(/^([A-Z0-9][A-Z0-9._/-]{1,24})(?=\s)/i);
+  if (mRef && !/^\d+([.,]\d+)?$/.test(mRef[1])) out.referencia = mRef[1].trim();
+
+  // Título: desde LOTE hasta el paréntesis de cierre.
+  const mTit = linea.match(/(LOTE\b[^)]*\))/i);
+  if (mTit) out.titulo = mTit[1].replace(/\s{2,}/g, ' ').trim();
+
+  // Precio: el primer importe con decimales de la línea. Van PRECIO e
+  // IMP. NETO, que para una unidad son el mismo número.
+  const nums = linea.match(/\d{1,3}(?:\.\d{3})*,\d{2}/g);
+  if (nums?.length) {
+    const n = Number(nums[0].replace(/\./g, '').replace(',', '.'));
+    if (isFinite(n) && n > 0) out.precio = Math.round(n * 100) / 100;
+  }
+  return out;
 }
 
 // ============================================================================

@@ -745,7 +745,7 @@ export async function generateBodegonPDF({ titulo, fotoUrl, productos, pieLegal 
 // catálogo: la marca (si se encuentra en el nombre) va en MAYÚSCULA y negrita,
 // el resto en su caja original y normal. Si no se localiza la marca exacta,
 // se resaltan las secuencias de MAYÚSCULAS (probables marcas) como reserva.
-function nameBrandRuns(name, brand) {
+export function nameBrandRuns(name, brand) {
   const nm = String(name || '').trim();
   const br = String(brand || '').trim();
   if (!nm) return [{ text: '', bold: false }];
@@ -759,16 +759,34 @@ function nameBrandRuns(name, brand) {
       return runs;
     }
   }
-  // Reserva: resaltar secuencias de MAYÚSCULAS (≥2 letras) como marca.
-  const re = /([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ0-9´'.-]*)*)/g;
-  const runs = []; let cursor = 0, m;
-  while ((m = re.exec(nm))) {
-    if ((m[0].match(/[A-ZÁÉÍÓÚÜÑ]/g) || []).length < 2) continue;
-    if (m.index > cursor) runs.push({ text: nm.slice(cursor, m.index), bold: false });
-    runs.push({ text: m[0], bold: true });
-    cursor = m.index + m[0].length;
+  // Reserva: resaltar las palabras ENTERAS en mayúsculas, que es como
+  // escriben las marcas ("Vermouth Rojo EL ARTESANO Btl. 50 cl").
+  //
+  // Se mira palabra a palabra en vez de con una regex larga. Con la regex se
+  // colaba la inicial de la palabra siguiente — "IZQUIERDO Salamanca" salía
+  // como "IZQUIERDO S" en negrita, y "R. Ibérica" como "R. I".
+  const esMarca = (w) =>
+    /[A-ZÁÉÍÓÚÜÑ]{2,}/.test(w) && !/[a-záéíóúüñ]/.test(w);
+
+  const trozos = nm.split(/(\s+)/);
+  const runs = [];
+  const empuja = (text, bold) => {
+    if (!text) return;
+    const ult = runs[runs.length - 1];
+    if (ult && ult.bold === bold) ult.text += text;
+    else runs.push({ text, bold });
+  };
+  for (let i = 0; i < trozos.length; i++) {
+    const t = trozos[i];
+    if (!t) continue;
+    if (/^\s+$/.test(t)) {
+      // Un espacio solo va en negrita si une dos palabras de marca.
+      const prev = trozos[i - 1], next = trozos[i + 1];
+      empuja(t, !!(prev && next && esMarca(prev) && esMarca(next)));
+      continue;
+    }
+    empuja(t, esMarca(t));
   }
-  if (cursor < nm.length) runs.push({ text: nm.slice(cursor), bold: false });
   return runs.length ? runs : [{ text: nm, bold: false }];
 }
 

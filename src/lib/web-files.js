@@ -168,7 +168,9 @@ export async function listEtiquetas() {
     .list('', { limit: 1000, sortBy: { column: 'name', order: 'asc' } });
   if (error) throw new Error(error.message);
   return (data || [])
-    .filter(o => o.name && !o.name.startsWith('.'))
+    // Fuera los que no son ficheros: la carpeta `especiales/` (lotes a medida)
+    // vive en este mismo bucket y no pinta nada en el listado de catálogo.
+    .filter(o => o.name && !o.name.startsWith('.') && o.id && /\.[a-z0-9]+$/i.test(o.name))
     .map(o => {
       const ref = o.name.replace(/\.[^.]+$/, '').toUpperCase();
       return {
