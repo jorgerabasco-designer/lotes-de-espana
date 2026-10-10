@@ -1072,6 +1072,7 @@ export default function WebScreen({ showInfo, products }) {
         open={especialOpen}
         products={products}
         initial={especialInicial}
+        existentes={especiales}
         onClose={() => { setEspecialOpen(false); setEspecialInicial(null); }}
         onGenerate={generarEspecial}
       />

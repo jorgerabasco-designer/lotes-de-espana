@@ -17,8 +17,22 @@ import { slugLoteEspecial } from '../lib/special-lotes.js';
 //
 // Props:
 //   open, products (catálogo), initial (lote guardado que se reedita)
-//   onClose, onGenerate({ ref, titulo, nombrePdf, precio, productos, fotoFile, guardar, slug })
-export default function SpecialLoteModal({ open, products, initial, onClose, onGenerate }) {
+//   existentes (los ya guardados, para no repetir nombre)
+//   onClose, onGenerate({ ref, titulo, precio, productos, fotoFile, guardar, slug })
+//
+// El NOMBRE DEL LOTE es uno solo y manda en todo: es lo que se ve en la
+// lista, lo que se busca y lo que da nombre a los PDFs y al ZIP. Antes había
+// además un "nombre del fichero PDF" aparte y solo generaba dudas.
+// "ALTADIA-1( PALETA IBERICA).pdf" → "ALTADIA-1"
+function nombreDesdeFichero(name) {
+  return String(name || '')
+    .replace(/\.[^.]+$/, '')
+    .split('(')[0]
+    .replace(/[_]+/g, ' ')
+    .trim();
+}
+
+export default function SpecialLoteModal({ open, products, initial, existentes, onClose, onGenerate }) {
   const [stage, setStage] = useState('upload');   // upload | leyendo | form
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
@@ -26,7 +40,6 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
 
   const [ref, setRef] = useState('');
   const [titulo, setTitulo] = useState('');
-  const [nombrePdf, setNombrePdf] = useState('');
   const [precio, setPrecio] = useState('');
   const [productos, setProductos] = useState([]);  // [{ ref, uds, descripcion }]
   const [guardar, setGuardar] = useState(true);
@@ -46,7 +59,6 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
       setStage('form');
       setRef(initial.ref || '');
       setTitulo(initial.titulo || '');
-      setNombrePdf(initial.nombrePdf || '');
       setPrecio(initial.precio != null ? Number(initial.precio).toFixed(2).replace('.', ',') : '');
       setProductos(initial.productos || []);
       setFotoPreview(initial.fotoUrl || null);
@@ -60,13 +72,21 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
 
   const reset = () => {
     setStage('upload'); setError(''); setFileName('');
-    setRef(''); setTitulo(''); setNombrePdf(''); setPrecio('');
+    setRef(''); setTitulo(''); setPrecio('');
     setProductos([]); setFotoFile(null); setFotoPreview(null); setGuardar(true);
   };
 
   const close = () => { reset(); onClose && onClose(); };
 
   const conEtiqueta = useMemo(() => productos.filter(p => p.ref).length, [productos]);
+
+  // Dos lotes especiales no pueden llamarse igual: el segundo pisaría al
+  // primero (comparten nombre de fichero, de foto y de ficha guardada).
+  const duplicado = useMemo(() => {
+    const slug = slugLoteEspecial(ref);
+    if (!slug) return null;
+    return (existentes || []).find(l => l.slug === slug && l.slug !== initial?.slug) || null;
+  }, [ref, existentes, initial?.slug]);
 
   // ---------- presupuesto ----------
   const handleFile = async (file) => {
@@ -114,11 +134,12 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
         return;
       }
 
-      const refProp = parsed.referencia || parsed.lote || '';
+      // El nombre sale de la referencia del presupuesto; si no viene, del
+      // nombre del fichero ("ALTADIA-1( PALETA IBERICA).pdf" → "ALTADIA-1").
+      const refProp = parsed.referencia || parsed.lote || nombreDesdeFichero(file.name);
       setRef(refProp);
       setTitulo(parsed.titulo || parsed.title || '');
       setPrecio(parsed.precio != null ? parsed.precio.toFixed(2).replace('.', ',') : '');
-      setNombrePdf(refProp ? `Lote Especial ${refProp}.pdf` : '');
       setProductos(lineas);
       setStage('form');
     } catch (e) {
@@ -150,7 +171,8 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
 
   const generar = async () => {
     if (busy) return;
-    if (!ref.trim()) { setError('Pon la referencia del lote (por ejemplo ALTADIA-1).'); return; }
+    if (!ref.trim()) { setError('Ponle un nombre al lote (por ejemplo ALTADIA-1).'); return; }
+    if (duplicado) { setError(`Ya hay un lote especial llamado «${duplicado.ref}». Ponle otro nombre.`); return; }
     if (!productos.length) { setError('No hay productos en el lote.'); return; }
     const n = precio.trim() ? Number(precio.replace(/\./g, '').replace(',', '.')) : null;
     if (precio.trim() && (!isFinite(n) || n < 0)) { setError('El precio no se entiende. Escríbelo como 100,00.'); return; }
@@ -161,7 +183,7 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
         slug: initial?.slug || slugLoteEspecial(ref),
         ref: ref.trim(),
         titulo: titulo.trim() || `LOTE ESPECIAL ${ref.trim()}`,
-        nombrePdf: (nombrePdf.trim() || `Lote Especial ${ref.trim()}.pdf`).replace(/(\.pdf)?$/i, '.pdf'),
+        nombrePdf: `${ref.trim()}.pdf`,
         precio: n,
         productos,
         fotoFile,
@@ -228,8 +250,13 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
           <div className="sl-body">
             <div className="sl-grid">
               <div className="sl-field">
-                <label className="sl-label">Referencia</label>
-                <input className="sl-input" value={ref} onChange={e => setRef(e.target.value)} placeholder="ALTADIA-1"/>
+                <label className="sl-label">Nombre del lote</label>
+                <input
+                  className={`sl-input ${duplicado ? 'mal' : ''}`}
+                  value={ref}
+                  onChange={e => setRef(e.target.value)}
+                  placeholder="ALTADIA-1"
+                />
               </div>
               <div className="sl-field">
                 <label className="sl-label">Precio sin IVA <span className="sl-opt">(opcional)</span></label>
@@ -242,10 +269,10 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
               <input className="sl-input" value={titulo} onChange={e => setTitulo(e.target.value)} placeholder="LOTE ESP. ALTADIA-1 ( PALETA IBÉRICA )"/>
             </div>
 
-            <div className="sl-field">
-              <label className="sl-label">Nombre del fichero PDF</label>
-              <input className="sl-input" value={nombrePdf} onChange={e => setNombrePdf(e.target.value)} placeholder="Lote Especial ALTADIA-1.pdf"/>
-              <div className="sl-hint">Es el nombre al que tiene que apuntar el QR.</div>
+            <div className="sl-hint sl-nombre-hint">
+              {duplicado
+                ? <span className="sl-dup">Ya hay un lote especial que se llama «{duplicado.ref}». Ponle otro nombre.</span>
+                : <>Los PDFs saldrán como <strong>{(ref || 'NOMBRE').trim()}.pdf</strong> y <strong>{(ref || 'NOMBRE').trim()} - Etiquetas.pdf</strong>.</>}
             </div>
 
             <div className="sl-field">
@@ -310,7 +337,7 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
             <button className="sl-btn sl-ghost" onClick={initial ? close : () => setStage('upload')} disabled={busy}>
               {initial ? 'Cancelar' : 'Atrás'}
             </button>
-            <button className="sl-btn sl-primary" onClick={generar} disabled={busy || !productos.length}>
+            <button className="sl-btn sl-primary" onClick={generar} disabled={busy || !productos.length || !!duplicado}>
               {busy ? 'Generando…' : <>{I.download ? I.download({ size: 14 }) : null} Generar los 3 PDFs</>}
             </button>
           </footer>
@@ -342,6 +369,9 @@ export default function SpecialLoteModal({ open, products, initial, onClose, onG
           .sl-input{font-family:inherit;font-size:13.5px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none;transition:all .15s}
           .sl-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
           .sl-hint{font-size:11.5px;color:var(--muted);line-height:1.45}
+          .sl-nombre-hint{margin:-10px 0 16px}
+          .sl-dup{color:var(--accent);font-weight:600}
+          .sl-input.mal{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 
           .sl-foto{border:1.5px dashed var(--line);border-radius:12px;padding:18px;text-align:center;cursor:pointer;background:#fff;transition:all .15s}
           .sl-foto:hover,.sl-foto.over{border-color:var(--accent);background:var(--accent-soft)}
